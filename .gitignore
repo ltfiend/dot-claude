@@ -39,7 +39,7 @@ stats-cache.json
 chrome/
 
 # Removed because currently there is nothing interesting in there and it's a lot of files
-plugins/           (installed plugins)
+plugins/
 
 # ===================
 # WHAT GETS TRACKED
