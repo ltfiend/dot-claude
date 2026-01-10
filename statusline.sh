@@ -257,18 +257,28 @@ get_git_branch() {
 # Build status line segments
 OUTPUT=""
 
-# Segment 1: Model name with icon
+# Segment 1: Current working directory
+if [ -n "$WORKSPACE_DIR" ] && [ "$WORKSPACE_DIR" != "null" ]; then
+    # Show just the directory name, not full path
+    DIR_NAME=$(basename "$WORKSPACE_DIR")
+    OUTPUT+="${BG_BLACK}${FG_WHITE}${BOLD} 📁 ${DIR_NAME} ${RESET}"
+    OUTPUT+="${FG_BLACK}${ARROW_RIGHT}${RESET}"
+fi
+
+# Segment 2: Model name with icon
 MODEL_ICON="🤖"
 if is_sonnet; then
     MODEL_ICON="🎵"
+    OUTPUT+="${SEP}"
     OUTPUT+="${BG_MAGENTA}${FG_WHITE}${BOLD} ${MODEL_ICON} ${MODEL:-Claude} ${RESET}"
     OUTPUT+="${FG_MAGENTA}${ARROW_RIGHT}${RESET}"
 else
+    OUTPUT+="${SEP}"
     OUTPUT+="${BG_BLUE}${FG_WHITE}${BOLD} ${MODEL_ICON} ${MODEL:-Claude} ${RESET}"
     OUTPUT+="${FG_BLUE}${ARROW_RIGHT}${RESET}"
 fi
 
-# Segment 2: Git branch (if in a git repo)
+# Segment 3: Git branch (if in a git repo)
 GIT_BRANCH=$(get_git_branch)
 if [ -n "$GIT_BRANCH" ]; then
     OUTPUT+="${SEP}"
@@ -276,32 +286,32 @@ if [ -n "$GIT_BRANCH" ]; then
     OUTPUT+="${FG_GRAY}${ARROW_RIGHT}${RESET}"
 fi
 
-# Segment 3: Context headroom bar (shows remaining capacity, decreases as context fills)
+# Segment 4: Context headroom bar (shows remaining capacity, decreases as context fills)
 HEADROOM_PERCENT=$((100 - CONTEXT_PERCENT))
 CONTEXT_BAR=$(make_headroom_bar $HEADROOM_PERCENT)
 OUTPUT+="${SEP}"
 OUTPUT+="${BG_CYAN}${FG_BLACK} 📊 ${HEADROOM_PERCENT}% ${CONTEXT_BAR} ${RESET}"
 OUTPUT+="${FG_CYAN}${ARROW_RIGHT}${RESET}"
 
-# Segment 4: Project tokens (accumulated)
+# Segment 5: Project tokens (accumulated)
 TOKENS_DISPLAY="$(format_tokens ${PROJECT_INPUT:-0})/$(format_tokens ${PROJECT_OUTPUT:-0})"
 OUTPUT+="${SEP}"
 OUTPUT+="${BG_GREEN}${FG_BLACK} ⇅ ${TOKENS_DISPLAY} ${RESET}"
 OUTPUT+="${FG_GREEN}${ARROW_RIGHT}${RESET}"
 
-# Segment 5: Project cost (accumulated)
+# Segment 6: Project cost (accumulated)
 COST_DISPLAY=$(format_cost "$PROJECT_COST")
 OUTPUT+="${SEP}"
 OUTPUT+="${BG_YELLOW}${FG_BLACK} 💰 ${COST_DISPLAY} ${RESET}"
 OUTPUT+="${FG_YELLOW}${ARROW_RIGHT}${RESET}"
 
-# Segment 6: Project duration (accumulated)
+# Segment 7: Project duration (accumulated)
 DURATION_DISPLAY=$(format_duration "$PROJECT_DURATION")
 OUTPUT+="${SEP}"
 OUTPUT+="${BG_RED}${FG_WHITE}${BOLD} ⏱ ${DURATION_DISPLAY} ${RESET}"
 OUTPUT+="${FG_RED}${ARROW_RIGHT}${RESET}"
 
-# Segment 7: Cache efficiency (if cache is being used)
+# Segment 8: Cache efficiency (if cache is being used)
 CACHE_TOTAL=$((${CACHE_CREATE:-0} + ${CACHE_READ:-0}))
 if [ "$CACHE_TOTAL" -gt 0 ]; then
     CACHE_HIT_PERCENT=$((${CACHE_READ:-0} * 100 / CACHE_TOTAL))
@@ -309,7 +319,7 @@ if [ "$CACHE_TOTAL" -gt 0 ]; then
     OUTPUT+="${FG_GRAY} ⚡${CACHE_HIT_PERCENT}%${RESET}"
 fi
 
-# Segment 8: Current time (far right)
+# Segment 9: Current time (far right)
 CURRENT_TIME=$(date '+%H:%M')
 OUTPUT+="${SEP}"
 OUTPUT+="${BG_BLACK}${FG_WHITE} ${CURRENT_TIME} ${RESET}"
