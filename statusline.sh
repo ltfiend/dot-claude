@@ -276,11 +276,11 @@ MODEL_ICON="🤖"
 if is_sonnet; then
     MODEL_ICON="🎵"
     OUTPUT+="${SEP}"
-    OUTPUT+="${BG_MAGENTA}${FG_WHITE}${BOLD} ${MODEL_ICON} ${MODEL:-Claude} ${RESET}"
+    OUTPUT+="${BG_MAGENTA}${FG_BLACK} ${MODEL_ICON} ${MODEL:-Claude} ${RESET}"
     OUTPUT+="${FG_MAGENTA}${ARROW_RIGHT}${RESET}"
 else
     OUTPUT+="${SEP}"
-    OUTPUT+="${BG_BLUE}${FG_WHITE}${BOLD} ${MODEL_ICON} ${MODEL:-Claude} ${RESET}"
+    OUTPUT+="${BG_BLUE}${FG_BLACK} ${MODEL_ICON} ${MODEL:-Claude} ${RESET}"
     OUTPUT+="${FG_BLUE}${ARROW_RIGHT}${RESET}"
 fi
 
@@ -289,7 +289,7 @@ GIT_ICON=$'\uf1d2'  # Font Awesome git icon
 GIT_BRANCH=$(get_git_branch)
 if [ -n "$GIT_BRANCH" ]; then
     OUTPUT+="${SEP}"
-    OUTPUT+="${BG_ORANGE}${FG_BLACK}${BOLD} ${GIT_ICON} ${GIT_BRANCH} ${RESET}"
+    OUTPUT+="${BG_ORANGE}${FG_BLACK} ${GIT_ICON} ${GIT_BRANCH} ${RESET}"
     OUTPUT+="${FG_ORANGE}${ARROW_RIGHT}${RESET}"
 fi
 
@@ -315,7 +315,7 @@ OUTPUT+="${FG_YELLOW}${ARROW_RIGHT}${RESET}"
 # Segment 7: Project duration (accumulated)
 DURATION_DISPLAY=$(format_duration "$PROJECT_DURATION")
 OUTPUT+="${SEP}"
-OUTPUT+="${BG_MAGENTA}${FG_BLACK}${BOLD} ⏱ ${DURATION_DISPLAY} ${RESET}"
+OUTPUT+="${BG_MAGENTA}${FG_BLACK} ⏱ ${DURATION_DISPLAY} ${RESET}"
 OUTPUT+="${FG_MAGENTA}${ARROW_RIGHT}${RESET}"
 
 # Segment 8: Cache efficiency (if cache is being used)
@@ -323,14 +323,14 @@ CACHE_TOTAL=$((${CACHE_CREATE:-0} + ${CACHE_READ:-0}))
 if [ "$CACHE_TOTAL" -gt 0 ]; then
     CACHE_HIT_PERCENT=$((${CACHE_READ:-0} * 100 / CACHE_TOTAL))
     OUTPUT+="${SEP}"
-    OUTPUT+="${BG_STEEL_BLUE}${FG_WHITE}${BOLD} ⚡${CACHE_HIT_PERCENT}% ${RESET}"
+    OUTPUT+="${BG_STEEL_BLUE}${FG_BLACK} ⚡${CACHE_HIT_PERCENT}% ${RESET}"
     OUTPUT+="${FG_STEEL_BLUE}${ARROW_RIGHT}${RESET}"
 fi
 
 # Segment 9: Current date/time (far right)
 CURRENT_TIME=$(date '+%Y-%m-%d %H:%M')
 OUTPUT+="${SEP}"
-OUTPUT+="${BG_GRAY}${FG_BLACK}${BOLD} ${CURRENT_TIME} ${RESET}"
+OUTPUT+="${BG_GRAY}${FG_BLACK} ${CURRENT_TIME} ${RESET}"
 OUTPUT+="${FG_GRAY}${ARROW_RIGHT}${RESET}"
 
 echo -e "$OUTPUT"
