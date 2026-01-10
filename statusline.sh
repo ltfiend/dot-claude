@@ -315,8 +315,8 @@ OUTPUT+="${FG_YELLOW}${ARROW_RIGHT}${RESET}"
 # Segment 7: Project duration (accumulated)
 DURATION_DISPLAY=$(format_duration "$PROJECT_DURATION")
 OUTPUT+="${SEP}"
-OUTPUT+="${BG_RED}${FG_WHITE}${BOLD} ⏱ ${DURATION_DISPLAY} ${RESET}"
-OUTPUT+="${FG_RED}${ARROW_RIGHT}${RESET}"
+OUTPUT+="${BG_MAGENTA}${FG_WHITE}${BOLD} ⏱ ${DURATION_DISPLAY} ${RESET}"
+OUTPUT+="${FG_MAGENTA}${ARROW_RIGHT}${RESET}"
 
 # Segment 8: Cache efficiency (if cache is being used)
 CACHE_TOTAL=$((${CACHE_CREATE:-0} + ${CACHE_READ:-0}))
@@ -330,7 +330,7 @@ fi
 # Segment 9: Current date/time (far right)
 CURRENT_TIME=$(date '+%Y-%m-%d %H:%M')
 OUTPUT+="${SEP}"
-OUTPUT+="${BG_MAROON}${FG_WHITE}${BOLD} ${CURRENT_TIME} ${RESET}"
-OUTPUT+="${FG_MAROON}${ARROW_RIGHT}${RESET}"
+OUTPUT+="${BG_GRAY}${FG_WHITE}${BOLD} ${CURRENT_TIME} ${RESET}"
+OUTPUT+="${FG_GRAY}${ARROW_RIGHT}${RESET}"
 
 echo -e "$OUTPUT"
