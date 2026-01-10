@@ -1,0 +1,21 @@
+{
+  "model": "opus",
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline.sh",
+    "padding": 0
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/peter/.claude/hooks/log-prompts.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

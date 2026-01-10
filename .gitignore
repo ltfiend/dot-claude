@@ -1,0 +1,53 @@
+# Claude Code .gitignore
+# Only track global configuration, ignore transient/cache/sensitive data
+
+# ===================
+# SENSITIVE - Never commit
+# ===================
+.credentials.json
+*.credentials*
+*.secret*
+
+# ===================
+# CACHE & TRANSIENT DATA
+# ===================
+cache/
+file-history/
+session-env/
+shell-snapshots/
+debug/
+plans/
+todos/
+downloads/
+
+# ===================
+# SESSION & HISTORY
+# ===================
+history.jsonl
+projects/
+
+# ===================
+# ANALYTICS & TELEMETRY
+# ===================
+telemetry/
+statsig/
+stats-cache.json
+
+# ===================
+# BROWSER AUTOMATION
+# ===================
+chrome/
+
+# Removed because currently there is nothing interesting in there and it's a lot of files
+plugins/           (installed plugins)
+
+# ===================
+# WHAT GETS TRACKED
+# ===================
+# The following ARE tracked (not ignored):
+# - CLAUDE.md          (global instructions)
+# - settings.json      (user preferences)
+# - hooks/             (custom hook scripts)
+# - statusline.sh      (custom status line)
+# - *.md files         (documentation/notes)
+# - Any custom scripts
