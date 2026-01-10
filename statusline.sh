@@ -327,8 +327,8 @@ if [ "$CACHE_TOTAL" -gt 0 ]; then
     OUTPUT+="${FG_STEEL_BLUE}${ARROW_RIGHT}${RESET}"
 fi
 
-# Segment 9: Current time (far right)
-CURRENT_TIME=$(date '+%H:%M')
+# Segment 9: Current date/time (far right)
+CURRENT_TIME=$(date '+%Y-%m-%d %H:%M')
 OUTPUT+="${SEP}"
 OUTPUT+="${BG_MAROON}${FG_WHITE}${BOLD} ${CURRENT_TIME} ${RESET}"
 OUTPUT+="${FG_MAROON}${ARROW_RIGHT}${RESET}"
