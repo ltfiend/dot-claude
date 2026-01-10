@@ -281,10 +281,11 @@ else
 fi
 
 # Segment 3: Git branch (if in a git repo)
+GIT_ICON=$'\uf1d2'  # Font Awesome git icon
 GIT_BRANCH=$(get_git_branch)
 if [ -n "$GIT_BRANCH" ]; then
     OUTPUT+="${SEP}"
-    OUTPUT+="${BG_ORANGE}${FG_BLACK}${BOLD}  ${GIT_BRANCH} ${RESET}"
+    OUTPUT+="${BG_ORANGE}${FG_BLACK}${BOLD} ${GIT_ICON} ${GIT_BRANCH} ${RESET}"
     OUTPUT+="${FG_ORANGE}${ARROW_RIGHT}${RESET}"
 fi
 
