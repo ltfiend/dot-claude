@@ -83,3 +83,7 @@ cc --plugin-dir /path/to/plugin-name
 ## Environment Variables in Plugins
 
 Use `${CLAUDE_PLUGIN_ROOT}` for portable paths within plugin configurations. Environment variables are expanded in hooks.json and .mcp.json.
+
+## Workflow Rules
+
+- **Always commit after edits**: When you finish making code changes or edits, create a git commit with a descriptive message summarizing the changes. Do not wait for the user to ask.
