@@ -1,8 +1,12 @@
 #!/bin/bash
 # Trueline-style status line for Claude Code
-# Displays usage bars for session context and cost
+# Displays usage bars for project-level context and cost (accumulated across sessions)
 
 input=$(cat)
+
+# Project stats directory
+STATS_DIR="$HOME/.claude/project-stats"
+mkdir -p "$STATS_DIR"
 
 # ANSI color codes
 RESET='\033[0m'
@@ -51,6 +55,104 @@ CACHE_CREATE=$(get_value '.context_window.current_usage.cache_creation_input_tok
 CACHE_READ=$(get_value '.context_window.current_usage.cache_read_input_tokens')
 TOTAL_INPUT=$(get_value '.context_window.total_input_tokens')
 TOTAL_OUTPUT=$(get_value '.context_window.total_output_tokens')
+SESSION_ID=$(get_value '.session.session_id')
+WORKSPACE_DIR=$(get_value '.workspace.current_dir')
+
+# Project stats tracking
+get_project_hash() {
+    echo "$1" | md5sum | cut -c1-12
+}
+
+update_project_stats() {
+    local project_dir="$1"
+    local stats_file="$STATS_DIR/$(get_project_hash "$project_dir").json"
+
+    # Default values
+    local cur_cost=${COST:-0}
+    local cur_duration=${DURATION_MS:-0}
+    local cur_input=${TOTAL_INPUT:-0}
+    local cur_output=${TOTAL_OUTPUT:-0}
+
+    # Handle null/empty values
+    [[ "$cur_cost" == "null" ]] && cur_cost=0
+    [[ "$cur_duration" == "null" ]] && cur_duration=0
+    [[ "$cur_input" == "null" ]] && cur_input=0
+    [[ "$cur_output" == "null" ]] && cur_output=0
+
+    if [ -f "$stats_file" ]; then
+        # Read existing stats
+        local last_session=$(jq -r '.last_session_id // ""' "$stats_file")
+        local last_cost=$(jq -r '.last_session_cost // 0' "$stats_file")
+        local last_duration=$(jq -r '.last_session_duration // 0' "$stats_file")
+        local last_input=$(jq -r '.last_session_input // 0' "$stats_file")
+        local last_output=$(jq -r '.last_session_output // 0' "$stats_file")
+        local total_cost=$(jq -r '.total_cost // 0' "$stats_file")
+        local total_duration=$(jq -r '.total_duration // 0' "$stats_file")
+        local total_input=$(jq -r '.total_input // 0' "$stats_file")
+        local total_output=$(jq -r '.total_output // 0' "$stats_file")
+
+        if [ "$SESSION_ID" == "$last_session" ]; then
+            # Same session - calculate delta from last call
+            local delta_cost=$(echo "$cur_cost - $last_cost" | bc)
+            local delta_duration=$((cur_duration - last_duration))
+            local delta_input=$((cur_input - last_input))
+            local delta_output=$((cur_output - last_output))
+
+            # Only add positive deltas
+            [[ $(echo "$delta_cost > 0" | bc) -eq 1 ]] && total_cost=$(echo "$total_cost + $delta_cost" | bc)
+            [[ $delta_duration -gt 0 ]] && total_duration=$((total_duration + delta_duration))
+            [[ $delta_input -gt 0 ]] && total_input=$((total_input + delta_input))
+            [[ $delta_output -gt 0 ]] && total_output=$((total_output + delta_output))
+        else
+            # New session - add all current values
+            total_cost=$(echo "$total_cost + $cur_cost" | bc)
+            total_duration=$((total_duration + cur_duration))
+            total_input=$((total_input + cur_input))
+            total_output=$((total_output + cur_output))
+        fi
+    else
+        # First time for this project
+        local total_cost=$cur_cost
+        local total_duration=$cur_duration
+        local total_input=$cur_input
+        local total_output=$cur_output
+    fi
+
+    # Save updated stats
+    cat > "$stats_file" << EOF
+{
+  "project": "$project_dir",
+  "last_session_id": "$SESSION_ID",
+  "last_session_cost": $cur_cost,
+  "last_session_duration": $cur_duration,
+  "last_session_input": $cur_input,
+  "last_session_output": $cur_output,
+  "total_cost": $total_cost,
+  "total_duration": $total_duration,
+  "total_input": $total_input,
+  "total_output": $total_output
+}
+EOF
+
+    # Output the totals for use in statusline
+    echo "$total_cost $total_duration $total_input $total_output"
+}
+
+# Get project-level accumulated stats
+PROJECT_STATS=""
+if [ -n "$WORKSPACE_DIR" ] && [ "$WORKSPACE_DIR" != "null" ]; then
+    PROJECT_STATS=$(update_project_stats "$WORKSPACE_DIR")
+    PROJECT_COST=$(echo "$PROJECT_STATS" | awk '{print $1}')
+    PROJECT_DURATION=$(echo "$PROJECT_STATS" | awk '{print $2}')
+    PROJECT_INPUT=$(echo "$PROJECT_STATS" | awk '{print $3}')
+    PROJECT_OUTPUT=$(echo "$PROJECT_STATS" | awk '{print $4}')
+else
+    # Fallback to session stats if no workspace
+    PROJECT_COST=$COST
+    PROJECT_DURATION=$DURATION_MS
+    PROJECT_INPUT=$TOTAL_INPUT
+    PROJECT_OUTPUT=$TOTAL_OUTPUT
+fi
 
 # Calculate context usage percentage
 CURRENT_TOKENS=0
@@ -64,22 +166,23 @@ if [ -n "$CONTEXT_SIZE" ] && [ "$CONTEXT_SIZE" != "null" ] && [ "$CONTEXT_SIZE" 
 fi
 
 # Progress bar function (trueline style)
-make_bar() {
-    local percent=$1
-    local width=10
-    local filled=$((percent * width / 100))
+# Shows remaining capacity (bar decreases as usage increases)
+make_headroom_bar() {
+    local remaining_percent=$1
+    local width=20
+    local filled=$((remaining_percent * width / 100))
     local empty=$((width - filled))
     local bar=""
 
-    # Choose color based on percentage
+    # Choose color based on remaining percentage (low remaining = bad)
     local bar_color=$FG_GREEN
-    if [ "$percent" -ge 80 ]; then
+    if [ "$remaining_percent" -le 20 ]; then
         bar_color=$FG_RED
-    elif [ "$percent" -ge 60 ]; then
+    elif [ "$remaining_percent" -le 40 ]; then
         bar_color=$FG_YELLOW
     fi
 
-    # Build the bar
+    # Build the bar (filled = remaining capacity, empty = used)
     bar="${bar_color}"
     for ((i=0; i<filled; i++)); do bar+="█"; done
     bar+="${RESET}\033[90m"
@@ -173,28 +276,42 @@ if [ -n "$GIT_BRANCH" ]; then
     OUTPUT+="${FG_GRAY}${ARROW_RIGHT}${RESET}"
 fi
 
-# Segment 3: Context usage bar
-CONTEXT_BAR=$(make_bar $CONTEXT_PERCENT)
+# Segment 3: Context headroom bar (shows remaining capacity, decreases as context fills)
+HEADROOM_PERCENT=$((100 - CONTEXT_PERCENT))
+CONTEXT_BAR=$(make_headroom_bar $HEADROOM_PERCENT)
 OUTPUT+="${SEP}"
-OUTPUT+="${BG_CYAN}${FG_BLACK} 📊 Ctx ${CONTEXT_PERCENT}% ${CONTEXT_BAR} ${RESET}"
+OUTPUT+="${BG_CYAN}${FG_BLACK} 📊 ${HEADROOM_PERCENT}% ${CONTEXT_BAR} ${RESET}"
 OUTPUT+="${FG_CYAN}${ARROW_RIGHT}${RESET}"
 
-# Segment 4: Session tokens
-TOKENS_DISPLAY="$(format_tokens ${TOTAL_INPUT:-0})/$(format_tokens ${TOTAL_OUTPUT:-0})"
+# Segment 4: Project tokens (accumulated)
+TOKENS_DISPLAY="$(format_tokens ${PROJECT_INPUT:-0})/$(format_tokens ${PROJECT_OUTPUT:-0})"
 OUTPUT+="${SEP}"
 OUTPUT+="${BG_GREEN}${FG_BLACK} ⇅ ${TOKENS_DISPLAY} ${RESET}"
 OUTPUT+="${FG_GREEN}${ARROW_RIGHT}${RESET}"
 
-# Segment 5: Cost
-COST_DISPLAY=$(format_cost "$COST")
+# Segment 5: Project cost (accumulated)
+COST_DISPLAY=$(format_cost "$PROJECT_COST")
 OUTPUT+="${SEP}"
 OUTPUT+="${BG_YELLOW}${FG_BLACK} 💰 ${COST_DISPLAY} ${RESET}"
 OUTPUT+="${FG_YELLOW}${ARROW_RIGHT}${RESET}"
 
-# Segment 6: Session duration
-DURATION_DISPLAY=$(format_duration "$DURATION_MS")
+# Segment 6: Project duration (accumulated)
+DURATION_DISPLAY=$(format_duration "$PROJECT_DURATION")
 OUTPUT+="${SEP}"
 OUTPUT+="${BG_RED}${FG_WHITE}${BOLD} ⏱ ${DURATION_DISPLAY} ${RESET}"
 OUTPUT+="${FG_RED}${ARROW_RIGHT}${RESET}"
+
+# Segment 7: Cache efficiency (if cache is being used)
+CACHE_TOTAL=$((${CACHE_CREATE:-0} + ${CACHE_READ:-0}))
+if [ "$CACHE_TOTAL" -gt 0 ]; then
+    CACHE_HIT_PERCENT=$((${CACHE_READ:-0} * 100 / CACHE_TOTAL))
+    OUTPUT+="${SEP}"
+    OUTPUT+="${FG_GRAY} ⚡${CACHE_HIT_PERCENT}%${RESET}"
+fi
+
+# Segment 8: Current time (far right)
+CURRENT_TIME=$(date '+%H:%M')
+OUTPUT+="${SEP}"
+OUTPUT+="${BG_BLACK}${FG_WHITE} ${CURRENT_TIME} ${RESET}"
 
 echo -e "$OUTPUT"

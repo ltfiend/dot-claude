@@ -98,3 +98,39 @@ git status
 
 ---
 
+## 2026-01-10 13:21:00
+
+Can we make it so the statusline stats for usage, tokens, cost, and time are tracked for project instead of session.
+
+---
+
+## 2026-01-10 13:26:10
+
+create a README.md describing the files in the git respository
+
+---
+
+## 2026-01-10 13:29:42
+
+Tell me what other information you can get from the json file during claude processing that might be interesting for the status bar.  Also add a 'current time' segment on the far right.
+
+---
+
+## 2026-01-10 13:32:02
+
+Add the context headroom segment
+
+---
+
+## 2026-01-10 13:33:53
+
+Replace the current Ctx stat with context headroom in a percentage.  Make the bar decrease based on usage.  Also double the length of the bar on the statusline.  
+
+---
+
+## 2026-01-10 13:37:19
+
+Commit these changes
+
+---
+

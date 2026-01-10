@@ -32,6 +32,7 @@ projects/
 telemetry/
 statsig/
 stats-cache.json
+project-stats/
 
 # ===================
 # BROWSER AUTOMATION
