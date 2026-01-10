@@ -21,6 +21,7 @@ BG_MAGENTA='\033[45m'
 BG_RED='\033[41m'
 BG_BLACK='\033[40m'
 BG_GRAY='\033[100m'
+BG_ORANGE='\033[48;5;166m'  # Burnt orange
 
 FG_WHITE='\033[97m'
 FG_BLACK='\033[30m'
@@ -30,6 +31,7 @@ FG_GREEN='\033[32m'
 FG_YELLOW='\033[33m'
 FG_MAGENTA='\033[35m'
 FG_GRAY='\033[90m'
+FG_ORANGE='\033[38;5;166m'  # Burnt orange
 
 # Powerline-style arrows
 ARROW_RIGHT=''
@@ -282,8 +284,8 @@ fi
 GIT_BRANCH=$(get_git_branch)
 if [ -n "$GIT_BRANCH" ]; then
     OUTPUT+="${SEP}"
-    OUTPUT+="${BG_GRAY}${FG_WHITE}${BOLD}  ${GIT_BRANCH} ${RESET}"
-    OUTPUT+="${FG_GRAY}${ARROW_RIGHT}${RESET}"
+    OUTPUT+="${BG_ORANGE}${FG_BLACK}${BOLD}  ${GIT_BRANCH} ${RESET}"
+    OUTPUT+="${FG_ORANGE}${ARROW_RIGHT}${RESET}"
 fi
 
 # Segment 4: Context headroom bar (shows remaining capacity, decreases as context fills)
