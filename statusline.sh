@@ -22,6 +22,8 @@ BG_RED='\033[41m'
 BG_BLACK='\033[40m'
 BG_GRAY='\033[100m'
 BG_ORANGE='\033[48;5;166m'  # Burnt orange
+BG_MAROON='\033[48;5;124m'  # Dark red ~#ab260c
+BG_STEEL_BLUE='\033[48;5;67m'  # Steel blue for efficiency
 
 FG_WHITE='\033[97m'
 FG_BLACK='\033[30m'
@@ -32,6 +34,8 @@ FG_YELLOW='\033[33m'
 FG_MAGENTA='\033[35m'
 FG_GRAY='\033[90m'
 FG_ORANGE='\033[38;5;166m'  # Burnt orange
+FG_MAROON='\033[38;5;124m'  # Dark red ~#ab260c
+FG_STEEL_BLUE='\033[38;5;67m'  # Steel blue
 
 # Powerline-style arrows
 ARROW_RIGHT=''
@@ -319,12 +323,14 @@ CACHE_TOTAL=$((${CACHE_CREATE:-0} + ${CACHE_READ:-0}))
 if [ "$CACHE_TOTAL" -gt 0 ]; then
     CACHE_HIT_PERCENT=$((${CACHE_READ:-0} * 100 / CACHE_TOTAL))
     OUTPUT+="${SEP}"
-    OUTPUT+="${FG_GRAY} ⚡${CACHE_HIT_PERCENT}%${RESET}"
+    OUTPUT+="${BG_STEEL_BLUE}${FG_WHITE}${BOLD} ⚡${CACHE_HIT_PERCENT}% ${RESET}"
+    OUTPUT+="${FG_STEEL_BLUE}${ARROW_RIGHT}${RESET}"
 fi
 
 # Segment 9: Current time (far right)
 CURRENT_TIME=$(date '+%H:%M')
 OUTPUT+="${SEP}"
-OUTPUT+="${BG_BLACK}${FG_WHITE} ${CURRENT_TIME} ${RESET}"
+OUTPUT+="${BG_MAROON}${FG_WHITE}${BOLD} ${CURRENT_TIME} ${RESET}"
+OUTPUT+="${FG_MAROON}${ARROW_RIGHT}${RESET}"
 
 echo -e "$OUTPUT"
