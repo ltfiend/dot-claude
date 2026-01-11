@@ -312,13 +312,7 @@ OUTPUT+="${SEP}"
 OUTPUT+="${BG_BLACK}${FG_WHITE} 💰 ${COST_DISPLAY} ${RESET}"
 OUTPUT+="${FG_BLACK}${ARROW_RIGHT}${RESET}"
 
-# Segment 7: Project duration (accumulated)
-DURATION_DISPLAY=$(format_duration "$PROJECT_DURATION")
-OUTPUT+="${SEP}"
-OUTPUT+="${BG_MAGENTA}${FG_BLACK} ⏱ ${DURATION_DISPLAY} ${RESET}"
-OUTPUT+="${FG_MAGENTA}${ARROW_RIGHT}${RESET}"
-
-# Segment 8: Cache efficiency (if cache is being used)
+# Segment 7: Cache efficiency (if cache is being used)
 CACHE_TOTAL=$((${CACHE_CREATE:-0} + ${CACHE_READ:-0}))
 if [ "$CACHE_TOTAL" -gt 0 ]; then
     CACHE_HIT_PERCENT=$((${CACHE_READ:-0} * 100 / CACHE_TOTAL))
@@ -326,6 +320,12 @@ if [ "$CACHE_TOTAL" -gt 0 ]; then
     OUTPUT+="${BG_STEEL_BLUE}${FG_BLACK} ⚡${CACHE_HIT_PERCENT}% ${RESET}"
     OUTPUT+="${FG_STEEL_BLUE}${ARROW_RIGHT}${RESET}"
 fi
+
+# Segment 8: Project duration (accumulated)
+DURATION_DISPLAY=$(format_duration "$PROJECT_DURATION")
+OUTPUT+="${SEP}"
+OUTPUT+="${BG_MAGENTA}${FG_BLACK} ⏱ ${DURATION_DISPLAY} ${RESET}"
+OUTPUT+="${FG_MAGENTA}${ARROW_RIGHT}${RESET}"
 
 # Segment 9: Current date/time (far right)
 CURRENT_TIME=$(date '+%Y-%m-%d %H:%M')
