@@ -96,6 +96,24 @@ Edit `~/.claude/statusline.sh` to customize:
 - **Bar width**: Change `width=20` in `make_headroom_bar()` function
 - **Icons**: Replace emoji icons with alternatives
 
+### Segment Toggles
+
+Enable or disable individual segments by editing the toggle variables at the top of `statusline.sh`:
+
+```bash
+SHOW_DIRECTORY=1      # Current working directory
+SHOW_MODEL=1          # Model name (Opus/Sonnet)
+SHOW_GIT_BRANCH=1     # Git branch name
+SHOW_CONTEXT=1        # Context headroom bar
+SHOW_TOKENS=1         # Project token counts
+SHOW_COST=1           # Project cost
+SHOW_CACHE=1          # Cache efficiency
+SHOW_DURATION=1       # Project duration
+SHOW_DATETIME=1       # Current date/time
+```
+
+Set any value to `0` to hide that segment.
+
 ## Available Data
 
 The statusline receives JSON from Claude Code with these fields:
