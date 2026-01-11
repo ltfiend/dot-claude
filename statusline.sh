@@ -309,8 +309,8 @@ OUTPUT+="${FG_GREEN}${ARROW_RIGHT}${RESET}"
 # Segment 6: Project cost (accumulated)
 COST_DISPLAY=$(format_cost "$PROJECT_COST")
 OUTPUT+="${SEP}"
-OUTPUT+="${BG_YELLOW}${FG_BLACK} 💰 ${COST_DISPLAY} ${RESET}"
-OUTPUT+="${FG_YELLOW}${ARROW_RIGHT}${RESET}"
+OUTPUT+="${BG_BLACK}${FG_WHITE} 💰 ${COST_DISPLAY} ${RESET}"
+OUTPUT+="${FG_BLACK}${ARROW_RIGHT}${RESET}"
 
 # Segment 7: Project duration (accumulated)
 DURATION_DISPLAY=$(format_duration "$PROJECT_DURATION")
