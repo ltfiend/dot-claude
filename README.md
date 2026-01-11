@@ -2,6 +2,8 @@
 
 Personal configuration directory for [Claude Code](https://claude.ai/code) CLI.
 
+![Statusline Screenshot](statusline.png)
+
 ## Files
 
 ### Configuration
