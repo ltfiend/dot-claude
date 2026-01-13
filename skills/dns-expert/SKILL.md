@@ -6,7 +6,7 @@ description: >
   DANE/TLSA, CAA, HTTPS/SVCB records, DNS privacy (DoQ, ODoH),
   cloud DNS (Route53, Cloudflare, GCP), RPZ, DNS security,
   or DNS-related networking issues.
-version: 3.1.0
+version: 3.2.0
 ---
 
 # DNS Protocol Expert
@@ -305,9 +305,10 @@ www           IN HTTPS 1 . alpn="h2,h3" ech="..."
 | no-default-alpn | 2 | Don't use default ALPN |
 | port | 3 | Non-standard port |
 | ipv4hint | 4 | IPv4 address hints |
-| ipv6hint | 6 | IPv6 address hints |
 | ech | 5 | Encrypted Client Hello config |
+| ipv6hint | 6 | IPv6 address hints |
 | dohpath | 7 | DoH URI template path |
+| ohttp | 8 | Oblivious HTTP target config (RFC 9540) |
 
 ### SVCB for Non-HTTP Services
 ```zone
@@ -619,6 +620,12 @@ Reference: https://www.iana.org/assignments/dns-parameters/
 |------|------|-------------|
 | 64 | SVCB | General service binding |
 | 65 | HTTPS | HTTPS service binding |
+
+#### Resolver & Delegation (Emerging)
+| Type | Name | Description |
+|------|------|-------------|
+| 261 | RESINFO | Resolver information (RFC 9606) |
+| TBD | DELEG | Extensible delegation (draft-ietf-dnsop-deleg) |
 
 #### Zone Management
 | Type | Name | Description |
@@ -976,6 +983,213 @@ dig +short example.com HTTPS
 | Port distinguishable | N/A | Yes (853) | No (443) | Yes (853) | No (443) |
 | Query-IP separation | No | No | No | No | Yes |
 | Latency | Low | Medium | Medium | Low | Higher |
+
+## Resolver Information (RFC 9606)
+
+### RESINFO Record Type
+
+The RESINFO record (type 261) allows resolvers to advertise their capabilities to clients.
+
+#### Purpose
+- Discover resolver features (DNSSEC validation, ECS, QNAME minimization)
+- Identify resolver software and version
+- Learn about filtering/blocking policies
+- Find extended resolver information
+
+#### RESINFO Query
+```bash
+# Query resolver for its information
+dig @8.8.8.8 resolver.arpa RESINFO
+
+# Response contains key=value pairs:
+# qnamemin=true          - QNAME minimization enabled
+# exterr=true            - Extended DNS Errors (EDE) supported
+# infourl=https://...    - URL with resolver documentation
+# dnssec=true            - DNSSEC validation enabled
+```
+
+#### RESINFO Keys
+| Key | Description |
+|-----|-------------|
+| qnamemin | QNAME minimization enabled |
+| exterr | Extended DNS Errors (EDE) supported |
+| infourl | URL for resolver documentation |
+| dnssec | DNSSEC validation enabled |
+
+### Resolver Information Discovery
+
+```bash
+# DDR + RESINFO combined workflow
+# Step 1: Discover encrypted resolver endpoints
+dig _dns.resolver.arpa SVCB @192.0.2.1
+
+# Step 2: Query resolver capabilities
+dig resolver.arpa RESINFO @192.0.2.1
+
+# Step 3: Connect using discovered parameters
+kdig +tls @dns.example.com example.com
+```
+
+## DELEG Record (Draft)
+
+### Extensible Delegation Record
+
+DELEG is an emerging record type (draft-ietf-dnsop-deleg) designed to modernize DNS delegation with extensible parameters.
+
+#### Motivation
+- Current NS records are limited (just nameserver names)
+- No way to signal delegation parameters (DNSSEC, transport, etc.)
+- DELEG provides SVCB-like extensibility for delegations
+
+#### DELEG Record Format
+```zone
+; DELEG uses SVCB-style parameters
+child.example.com. IN DELEG 1 ns1.example.com. (
+    ipv4hint=192.0.2.1
+    ipv6hint=2001:db8::1
+    alpn="dot"
+)
+```
+
+#### DELEG vs NS
+| Aspect | NS | DELEG |
+|--------|-----|-------|
+| Parameters | None | Extensible (like SVCB) |
+| Transport hints | No | Yes (DoT, DoH, DoQ) |
+| Address hints | Via glue (optional) | Built-in |
+| DNSSEC info | Via DS | Can include DS info |
+
+#### Current Status
+- IETF draft under active development
+- Not yet assigned TYPE code
+- Experimental implementations exist
+
+## DNS64 (RFC 6147)
+
+### IPv6 Transition Mechanism
+
+DNS64 synthesizes AAAA records from A records for IPv6-only clients needing to reach IPv4-only servers.
+
+#### Architecture
+```
+                           NAT64 Gateway
+IPv6-only Client → DNS64 → ─────────────── → IPv4 Server
+                           (synthesizes AAAA)
+```
+
+#### How DNS64 Works
+1. Client queries AAAA for `example.com`
+2. If no AAAA exists, DNS64 queries for A record
+3. DNS64 synthesizes AAAA using NAT64 prefix (e.g., `64:ff9b::/96`)
+4. Client connects to synthesized IPv6 address
+5. NAT64 gateway translates to IPv4
+
+#### Example Synthesis
+```
+# Original A record
+example.com. IN A 192.0.2.1
+
+# DNS64 synthesizes (using 64:ff9b::/96 prefix)
+example.com. IN AAAA 64:ff9b::192.0.2.1
+# Which is: 64:ff9b::c000:201
+```
+
+#### Unbound DNS64 Configuration
+```yaml
+server:
+    module-config: "dns64 validator iterator"
+    dns64-prefix: 64:ff9b::/96
+    # Exclude these from synthesis (native IPv6)
+    dns64-synthall: no
+```
+
+#### BIND DNS64 Configuration
+```
+options {
+    dns64 64:ff9b::/96 {
+        clients { any; };
+        mapped { !rfc1918; any; };
+        exclude { 64:ff9b::/96; };
+    };
+};
+```
+
+#### Testing DNS64
+```bash
+# Check if resolver does DNS64
+dig @your-resolver ipv4only.arpa AAAA +short
+# Should return synthesized AAAA (proves DNS64 active)
+
+# The ipv4only.arpa zone has only A records by design
+# Used specifically for DNS64/NAT64 testing
+```
+
+#### Well-Known NAT64 Prefix
+- `64:ff9b::/96` - The well-known prefix (RFC 6052)
+- `64:ff9b:1::/48` - For local use (RFC 8215)
+- Custom prefixes for private deployments
+
+## Authoritative DNS over TLS (ADoT)
+
+### Encrypted Zone Transfers and Queries
+
+ADoT extends DoT to the authoritative server side, encrypting:
+- Zone transfers (AXFR/IXFR over TLS)
+- Queries from resolvers to authoritative servers
+
+#### Use Cases
+- Secure zone transfers between primary and secondary
+- Privacy for resolver ↔ authoritative queries
+- Protection against query interception
+
+#### BIND ADoT Configuration (Primary)
+```
+options {
+    listen-on-tls port 853 { any; };
+};
+
+tls local-tls {
+    key-file "/etc/bind/keys/server.key";
+    cert-file "/etc/bind/keys/server.crt";
+};
+
+zone "example.com" {
+    type primary;
+    file "example.com.zone";
+    allow-transfer transport tls { key secondary-key; };
+};
+```
+
+#### BIND ADoT Configuration (Secondary)
+```
+tls upstream-tls {
+    ca-file "/etc/bind/ca/ca.crt";
+    remote-hostname "primary.example.com";
+};
+
+zone "example.com" {
+    type secondary;
+    primaries port 853 tls upstream-tls { 192.0.2.1; };
+};
+```
+
+#### Zone Transfer over TLS (Manual Test)
+```bash
+# Test XoT (zone transfer over TLS)
+kdig +tls @primary.example.com example.com AXFR
+
+# Verify certificate
+openssl s_client -connect primary.example.com:853 \
+    -servername primary.example.com
+```
+
+#### ADoT Deployment Status
+| Server | ADoT Support |
+|--------|--------------|
+| BIND 9.18+ | Full (XoT, queries) |
+| Knot DNS | Full |
+| PowerDNS | Experimental |
+| NSD | Partial |
 
 ## Cloud DNS Operations
 
@@ -2469,6 +2683,167 @@ spec:
     - 192.0.2.1
 ```
 
+### DNS in Kubernetes (Deep Dive)
+
+#### Pod DNS Resolution Flow
+```
+Pod → /etc/resolv.conf → CoreDNS (kube-dns) → Upstream
+                              │
+                              ├── cluster.local queries
+                              │   └── kubernetes API (endpoints)
+                              │
+                              └── external queries
+                                  └── forward to upstream
+```
+
+#### Kubernetes DNS Search Domains
+```bash
+# Default /etc/resolv.conf in a pod (namespace: default)
+nameserver 10.96.0.10
+search default.svc.cluster.local svc.cluster.local cluster.local
+options ndots:5
+```
+
+#### ndots Explained
+```yaml
+# ndots:5 means names with <5 dots get search domains appended first
+# Query: api.example.com (2 dots, < 5)
+# Order: api.example.com.default.svc.cluster.local
+#        api.example.com.svc.cluster.local
+#        api.example.com.cluster.local
+#        api.example.com  ← finally tries absolute
+
+# For external domains, reduce ndots or use trailing dot
+spec:
+  dnsConfig:
+    options:
+      - name: ndots
+        value: "2"
+```
+
+#### CoreDNS Plugin Chain
+```
+.:53 {
+    errors                    # Log errors
+    health                    # Health check endpoint
+    ready                     # Readiness endpoint
+
+    kubernetes cluster.local in-addr.arpa ip6.arpa {
+        pods insecure         # Respond to pod IP queries
+        fallthrough in-addr.arpa ip6.arpa
+        ttl 30                # Cache TTL for k8s records
+    }
+
+    prometheus :9153          # Metrics endpoint
+    forward . /etc/resolv.conf # Upstream resolution
+    cache 30                  # Cache non-k8s responses
+    loop                      # Detect forwarding loops
+    reload                    # Reload config on change
+    loadbalance               # Round-robin A/AAAA
+}
+```
+
+#### Headless Services DNS
+```yaml
+# Headless service (clusterIP: None)
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-statefulset
+spec:
+  clusterIP: None
+  selector:
+    app: my-app
+
+# DNS records created:
+# my-statefulset.default.svc.cluster.local → A records for each pod
+# pod-0.my-statefulset.default.svc.cluster.local → specific pod IP
+# pod-1.my-statefulset.default.svc.cluster.local → specific pod IP
+```
+
+#### Custom DNS per Pod
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: custom-dns-pod
+spec:
+  dnsPolicy: "None"  # Disable default DNS
+  dnsConfig:
+    nameservers:
+      - 1.1.1.1
+      - 8.8.8.8
+    searches:
+      - my-namespace.svc.cluster.local
+      - svc.cluster.local
+    options:
+      - name: ndots
+        value: "2"
+      - name: edns0
+```
+
+#### DNS Policies
+| Policy | Description |
+|--------|-------------|
+| ClusterFirst | Use cluster DNS, fall back to node DNS |
+| ClusterFirstWithHostNet | Like ClusterFirst but for hostNetwork pods |
+| Default | Inherit from node |
+| None | Custom via dnsConfig only |
+
+#### Debugging K8s DNS
+```bash
+# Run debug pod with DNS tools
+kubectl run dnsutils --image=registry.k8s.io/e2e-test-images/jessie-dnsutils:1.3 \
+    --restart=Never --rm -it -- bash
+
+# Inside pod:
+nslookup kubernetes.default
+dig +search nginx-service
+cat /etc/resolv.conf
+
+# Check CoreDNS logs
+kubectl logs -n kube-system -l k8s-app=kube-dns
+
+# Check CoreDNS metrics
+kubectl exec -n kube-system deploy/coredns -- curl localhost:9153/metrics
+```
+
+### Container DNS Patterns
+
+#### Docker DNS
+```bash
+# Docker built-in DNS server at 127.0.0.11
+# Containers can resolve each other by name on user-defined networks
+
+docker network create my-net
+docker run -d --name db --network my-net postgres
+docker run --network my-net alpine ping db  # Resolves!
+
+# Custom DNS servers
+docker run --dns 8.8.8.8 --dns-search example.com alpine
+```
+
+#### Docker Compose DNS
+```yaml
+version: "3"
+services:
+  web:
+    image: nginx
+    networks:
+      - frontend
+    # Can resolve 'api' by name
+  api:
+    image: myapp
+    networks:
+      - frontend
+      - backend
+  db:
+    image: postgres
+    networks:
+      - backend
+    # 'web' cannot resolve 'db' (different network)
+```
+
 ### DNS Monitoring & Observability
 
 #### Key Metrics
@@ -2606,3 +2981,206 @@ ipv6_to_ptr "2001:0db8:0000:0000:0000:0000:0000:0001"
 | 6762 | Multicast DNS | mDNS specification |
 | 6763 | DNS-Based Service Discovery | DNS-SD specification |
 | 8882 | DNS-SD Privacy Extensions | Private DNS-SD |
+
+## Zero Trust DNS Architecture
+
+### Principles
+
+Zero Trust DNS treats every DNS query and response as potentially malicious, requiring verification at every step.
+
+#### Core Concepts
+1. **Never trust, always verify** - Validate all DNS responses
+2. **Least privilege access** - Restrict DNS resolution paths
+3. **Assume breach** - Log and monitor all DNS activity
+4. **Microsegmentation** - Per-application DNS policies
+
+### Implementation Patterns
+
+#### Encrypted DNS Everywhere
+```
+Client ──DoH/DoT──→ Local Resolver ──DoT──→ Upstream ──ADoT──→ Authoritative
+           │                │                    │
+           └── TLS 1.3 ─────┴──── TLS 1.3 ───────┘
+```
+
+#### DNS Firewall / RPZ Integration
+```yaml
+# Unbound with threat intelligence feeds
+server:
+    # Validate DNSSEC
+    auto-trust-anchor-file: "/var/lib/unbound/root.key"
+    val-clean-additional: yes
+
+    # Block private IP in public DNS (rebinding protection)
+    private-address: 10.0.0.0/8
+    private-address: 172.16.0.0/12
+    private-address: 192.168.0.0/16
+
+rpz:
+    name: "threat-intel.rpz.local."
+    zonefile: "/etc/unbound/threat-intel.rpz"
+    rpz-log: yes
+    rpz-log-name: "blocked-domain"
+```
+
+#### Per-Application DNS Policies
+```yaml
+# Kubernetes NetworkPolicy for DNS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: restrict-dns
+spec:
+  podSelector:
+    matchLabels:
+      app: secure-app
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+```
+
+### DNS Logging & Analysis
+
+#### Comprehensive Query Logging
+```yaml
+# Unbound logging config
+server:
+    verbosity: 1
+    log-queries: yes
+    log-replies: yes
+    log-tag-queryreply: yes
+    log-local-actions: yes
+
+# dnstap for structured logging
+dnstap:
+    dnstap-enable: yes
+    dnstap-socket-path: "/var/run/dnstap.sock"
+    dnstap-log-client-query-messages: yes
+    dnstap-log-client-response-messages: yes
+```
+
+#### Threat Detection Signals
+| Signal | Indicates |
+|--------|-----------|
+| High NXDOMAIN rate | DGA malware, typosquatting attempts |
+| Long query names | DNS tunneling |
+| Unusual TXT queries | Data exfiltration |
+| Queries to new domains | Potential C2 communication |
+| High query volume from single source | Compromised host |
+| Queries bypassing local resolver | Malware using hardcoded DNS |
+
+#### DGA Detection Heuristics
+```bash
+# Characteristics of DGA domains:
+# - High entropy in domain name
+# - Random-looking character sequences
+# - Short registration age
+# - No meaningful words
+
+# Example entropy check
+echo "xk3mf8nq2p.com" | fold -w1 | sort -u | wc -l
+# High unique character count = likely DGA
+```
+
+### Secure Resolver Deployment
+
+#### Validating Resolver Chain
+```
+Client ──DoH──→ Edge Resolver ──DoT──→ Core Resolver ──→ Authoritative
+                     │                      │
+                     ├── DNSSEC validation  │
+                     ├── RPZ filtering      │
+                     └── ECS stripping      │
+                                            │
+                                      DNSSEC validation
+                                      Response logging
+```
+
+#### Resolver Hardening Checklist
+- [ ] **DNSSEC validation** enabled with trust anchor updates
+- [ ] **DoT/DoH** for client connections
+- [ ] **ADoT** for upstream connections
+- [ ] **QNAME minimization** enabled
+- [ ] **Aggressive NSEC** caching enabled
+- [ ] **RPZ** with threat intelligence feeds
+- [ ] **Query logging** with retention policy
+- [ ] **ECS** disabled or sanitized for privacy
+- [ ] **Private address** filtering (anti-rebinding)
+- [ ] **Rate limiting** per source IP
+
+### DNS Access Control
+
+#### Split-Horizon by User/Group
+```yaml
+# CoreDNS with metadata plugin
+.:53 {
+    metadata
+
+    template IN A internal-app.corp {
+        match "^internal-app\.corp\.$"
+        answer "{{ .Name }} 60 IN A 10.0.0.50"
+        fallthrough
+    }
+
+    # Different responses based on source
+    view internal {
+        expr metadata('client/ip') matches '10.0.0.0/8'
+    }
+
+    forward . 8.8.8.8
+}
+```
+
+#### Application-Aware DNS
+```yaml
+# Envoy DNS filter with per-service resolution
+static_resources:
+  listeners:
+    - name: dns_listener
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 53
+      filter_chains:
+        - filters:
+            - name: envoy.filters.udp.dns_filter
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.udp.dns_filter.v3.DnsFilterConfig
+                stat_prefix: dns_filter
+                client_config:
+                  resolver_timeout: 1s
+                  upstream_resolvers:
+                    - socket_address:
+                        address: 1.1.1.1
+                        port_value: 53
+```
+
+### Monitoring & Response
+
+#### DNS Security Metrics
+| Metric | Description | Baseline |
+|--------|-------------|----------|
+| `dns_blocked_queries_total` | Queries blocked by RPZ | Track trends |
+| `dns_dnssec_failures_total` | DNSSEC validation failures | < 0.1% |
+| `dns_tunnel_attempts` | Suspected tunneling | 0 |
+| `dns_query_latency_p99` | Resolution latency | < 100ms |
+| `dns_upstream_failures` | Upstream resolver errors | < 1% |
+
+#### Incident Response Actions
+1. **Block domain** - Add to RPZ immediately
+2. **Quarantine source** - Isolate querying host
+3. **Capture traffic** - Enable full packet capture
+4. **Correlate logs** - Cross-reference with other signals
+5. **Report upstream** - Submit to threat intel feeds
