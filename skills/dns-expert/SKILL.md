@@ -3,8 +3,10 @@ name: dns-expert
 description: >
   Use this skill when the user asks about DNS protocol, record types,
   zone files, DNSSEC, DNS troubleshooting, resolver configuration,
-  DANE/TLSA, CAA, HTTPS/SVCB records, or DNS-related networking issues.
-version: 2.0.0
+  DANE/TLSA, CAA, HTTPS/SVCB records, DNS privacy (DoQ, ODoH),
+  cloud DNS (Route53, Cloudflare, GCP), RPZ, DNS security,
+  or DNS-related networking issues.
+version: 3.0.0
 ---
 
 # DNS Protocol Expert
@@ -846,3 +848,1003 @@ For HTML with better formatting:
 ```
 WebFetch: https://datatracker.ietf.org/doc/html/rfc8914
 ```
+
+## DNS Privacy Protocols
+
+### Evolution of Encrypted DNS
+| Protocol | Port | RFC | Transport | Status |
+|----------|------|-----|-----------|--------|
+| DNS (classic) | 53 | 1035 | UDP/TCP | Standard |
+| DNS over TLS (DoT) | 853 | 7858 | TLS | Deployed |
+| DNS over HTTPS (DoH) | 443 | 8484 | HTTPS | Deployed |
+| DNS over QUIC (DoQ) | 853 | 9250 | QUIC | Emerging |
+| Oblivious DoH (ODoH) | 443 | 9230 | HTTPS | Emerging |
+| DNS over Dedicated QUIC (DDR) | 443 | 9462 | QUIC | Emerging |
+
+### DNS over QUIC (DoQ) - RFC 9250
+
+#### Advantages over DoT/DoH
+- **0-RTT connection establishment**: Faster than TCP+TLS handshake
+- **Multiplexed streams**: No head-of-line blocking
+- **Connection migration**: Survives network changes
+- **Native encryption**: QUIC includes TLS 1.3
+
+#### DoQ Wire Format
+- Uses QUIC streams (one query per stream)
+- 2-byte length prefix (like DNS over TCP)
+- Port 853 (same as DoT, distinguished by ALPN `doq`)
+
+#### Client Configuration
+```bash
+# Using q (modern DNS client)
+q example.com A --quic @dns.adguard-dns.com
+
+# Using kdig with QUIC
+kdig +quic @dns.adguard-dns.com example.com
+```
+
+#### DoQ Providers
+| Provider | Endpoint | ALPN |
+|----------|----------|------|
+| AdGuard | dns.adguard-dns.com:853 | doq |
+| Cloudflare | cloudflare-dns.com:853 | doq |
+| NextDNS | dns.nextdns.io:853 | doq |
+
+### Oblivious DNS over HTTPS (ODoH) - RFC 9230
+
+#### Purpose
+- **Separates client identity from queries**: Proxy sees client IP but not query content; target sees query but not client IP
+- **Privacy enhancement**: Neither proxy nor target has full picture
+- **Based on Oblivious HTTP (OHTTP)**: RFC 9458
+
+#### Architecture
+```
+Client → Proxy (Oblivious Relay) → Target (Resolver)
+         [encrypted query blob]    [decrypts, resolves]
+
+Client IP visible: YES              NO
+Query visible:     NO               YES
+```
+
+#### ODoH Flow
+1. Client encrypts DNS query using target's public key
+2. Client sends encrypted blob to proxy (relay)
+3. Proxy forwards to target without seeing content
+4. Target decrypts, resolves, encrypts response
+5. Response flows back through proxy
+
+#### Configuration Discovery
+- Target advertises public key via `/.well-known/odohconfigs`
+- HTTPS record with `odoh` service parameter
+
+#### ODoH Providers
+| Role | Provider | Endpoint |
+|------|----------|----------|
+| Target | Cloudflare | odoh.cloudflare-dns.com |
+| Relay | Fastly | odoh.fastly-edge.com |
+| Target | Apple | doh.dns.apple.com (via iCloud Private Relay) |
+
+### DNS Discovery of Designated Resolvers (DDR) - RFC 9462
+
+#### Purpose
+- Automatic upgrade from unencrypted to encrypted DNS
+- Client discovers DoT/DoH/DoQ endpoints from IP address
+
+#### Discovery Process
+```bash
+# Query for _dns.resolver.arpa with SVCB record
+dig _dns.resolver.arpa SVCB @192.0.2.1
+
+# Response indicates encrypted endpoints
+_dns.resolver.arpa. IN SVCB 1 dns.example.com. (
+    alpn="h2,h3,doq" port=443
+    dohpath="/dns-query{?dns}"
+)
+```
+
+#### SVCB Parameters for DDR
+| Parameter | Description |
+|-----------|-------------|
+| alpn | Supported protocols (h2=DoH, h3=DoH/3, doq=DoQ) |
+| port | Service port (443 for DoH, 853 for DoT/DoQ) |
+| dohpath | URI template for DoH queries |
+| ipv4hint/ipv6hint | Address hints for connection |
+
+### Encrypted Client Hello (ECH) with DNS
+
+#### Purpose
+- Encrypt SNI in TLS handshake (prevents SNI snooping)
+- ECH configuration distributed via HTTPS records
+
+#### HTTPS Record with ECH
+```zone
+example.com. IN HTTPS 1 . alpn="h2,h3" ech="..."
+```
+
+#### ECH Key Retrieval
+```bash
+# Fetch HTTPS record to get ECH config
+dig +short example.com HTTPS
+```
+
+### Privacy Comparison Matrix
+
+| Aspect | Plain DNS | DoT | DoH | DoQ | ODoH |
+|--------|-----------|-----|-----|-----|------|
+| Query encryption | No | Yes | Yes | Yes | Yes |
+| Metadata protection | No | Partial | Better | Better | Best |
+| Port distinguishable | N/A | Yes (853) | No (443) | Yes (853) | No (443) |
+| Query-IP separation | No | No | No | No | Yes |
+| Latency | Low | Medium | Medium | Low | Higher |
+
+## Cloud DNS Operations
+
+### AWS Route 53
+
+#### Record Types & Routing Policies
+| Policy | Description | Use Case |
+|--------|-------------|----------|
+| Simple | Single value, no health checks | Basic DNS |
+| Weighted | Distribute traffic by weight | Blue/green deployment |
+| Latency | Route to lowest latency region | Global apps |
+| Failover | Primary/secondary with health check | HA |
+| Geolocation | Route by client location | Compliance, localization |
+| Geoproximity | Route by geographic distance | Traffic shifting |
+| Multivalue | Multiple healthy values (up to 8) | Simple load balancing |
+
+#### Route 53 CLI Examples
+```bash
+# List hosted zones
+aws route53 list-hosted-zones
+
+# Get records in a zone
+aws route53 list-resource-record-sets --hosted-zone-id Z1234567890
+
+# Create/update records (JSON changeset)
+aws route53 change-resource-record-sets \
+  --hosted-zone-id Z1234567890 \
+  --change-batch file://changes.json
+```
+
+#### Change Batch JSON
+```json
+{
+  "Changes": [{
+    "Action": "UPSERT",
+    "ResourceRecordSet": {
+      "Name": "www.example.com",
+      "Type": "A",
+      "TTL": 300,
+      "ResourceRecords": [{"Value": "192.0.2.1"}]
+    }
+  }]
+}
+```
+
+#### Alias Records (Route 53 Specific)
+```json
+{
+  "Name": "example.com",
+  "Type": "A",
+  "AliasTarget": {
+    "HostedZoneId": "Z2FDTNDATAQYW2",
+    "DNSName": "d111111abcdef8.cloudfront.net",
+    "EvaluateTargetHealth": true
+  }
+}
+```
+
+#### Route 53 Resolver (Hybrid DNS)
+```bash
+# Create outbound endpoint (VPC to on-prem)
+aws route53resolver create-resolver-endpoint \
+  --creator-request-id $(date +%s) \
+  --direction OUTBOUND \
+  --ip-addresses SubnetId=subnet-123,Ip=10.0.1.10
+
+# Create forwarding rule
+aws route53resolver create-resolver-rule \
+  --domain-name corp.internal \
+  --rule-type FORWARD \
+  --resolver-endpoint-id rslvr-out-123 \
+  --target-ips Ip=10.1.1.53,Port=53
+```
+
+### Cloudflare DNS
+
+#### API Examples
+```bash
+# List zones
+curl -X GET "https://api.cloudflare.com/client/v4/zones" \
+  -H "Authorization: Bearer $CF_TOKEN"
+
+# Create DNS record
+curl -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
+  -H "Authorization: Bearer $CF_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "type": "A",
+    "name": "www",
+    "content": "192.0.2.1",
+    "ttl": 300,
+    "proxied": true
+  }'
+
+# Update record
+curl -X PATCH "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$RECORD_ID" \
+  -H "Authorization: Bearer $CF_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"content": "192.0.2.2"}'
+```
+
+#### Cloudflare-Specific Features
+| Feature | Description |
+|---------|-------------|
+| Proxied records | Orange cloud - traffic through CF (DDoS, CDN) |
+| DNS-only | Grey cloud - just DNS, no proxy |
+| CNAME flattening | Automatic at apex (returns A/AAAA) |
+| Secondary DNS | AXFR from your primary |
+| DNSSEC | One-click enable |
+
+#### Terraform Example
+```hcl
+resource "cloudflare_record" "www" {
+  zone_id = var.cloudflare_zone_id
+  name    = "www"
+  value   = "192.0.2.1"
+  type    = "A"
+  ttl     = 300
+  proxied = true
+}
+```
+
+### Google Cloud DNS
+
+#### gcloud CLI
+```bash
+# Create managed zone
+gcloud dns managed-zones create example-zone \
+  --dns-name="example.com." \
+  --description="Production zone"
+
+# Start a transaction
+gcloud dns record-sets transaction start --zone=example-zone
+
+# Add record
+gcloud dns record-sets transaction add "192.0.2.1" \
+  --name="www.example.com." \
+  --ttl=300 \
+  --type=A \
+  --zone=example-zone
+
+# Execute transaction
+gcloud dns record-sets transaction execute --zone=example-zone
+
+# List records
+gcloud dns record-sets list --zone=example-zone
+```
+
+#### Private Zones (GCP)
+```bash
+# Create private zone
+gcloud dns managed-zones create private-zone \
+  --dns-name="internal.example.com." \
+  --visibility=private \
+  --networks=default
+
+# Enable inbound forwarding (on-prem to GCP)
+gcloud dns policies create inbound-policy \
+  --networks=default \
+  --enable-inbound-forwarding
+```
+
+### Azure DNS
+
+#### Azure CLI
+```bash
+# Create DNS zone
+az network dns zone create \
+  --resource-group myResourceGroup \
+  --name example.com
+
+# Add A record
+az network dns record-set a add-record \
+  --resource-group myResourceGroup \
+  --zone-name example.com \
+  --record-set-name www \
+  --ipv4-address 192.0.2.1
+
+# Create alias record to Azure resource
+az network dns record-set a create \
+  --resource-group myResourceGroup \
+  --zone-name example.com \
+  --name apex \
+  --target-resource /subscriptions/.../publicIPAddresses/myPublicIP
+```
+
+#### Private DNS Zones (Azure)
+```bash
+# Create private zone
+az network private-dns zone create \
+  --resource-group myResourceGroup \
+  --name private.example.com
+
+# Link to VNet
+az network private-dns link vnet create \
+  --resource-group myResourceGroup \
+  --zone-name private.example.com \
+  --name myVNetLink \
+  --virtual-network myVNet \
+  --registration-enabled true
+```
+
+### Multi-Cloud DNS Patterns
+
+#### Active-Active with Health Checks
+```
+                    ┌──────────────┐
+                    │   Primary    │
+User → DNS ─────────┤   (Route53)  │──→ AWS Region
+       (GSLB)       │              │
+                    ├──────────────┤
+                    │   Secondary  │
+                    │   (Cloud DNS)│──→ GCP Region
+                    └──────────────┘
+```
+
+#### NS Delegation Pattern
+```zone
+; Parent zone at registrar points to multiple clouds
+example.com.  IN NS ns1.route53.example.com.
+example.com.  IN NS ns2.route53.example.com.
+example.com.  IN NS ns1.cloudflare.example.com.
+example.com.  IN NS ns2.cloudflare.example.com.
+```
+
+## DNS Security Deep Dive
+
+### Response Policy Zones (RPZ)
+
+#### Purpose
+- DNS-based filtering/blocking at resolver level
+- Block malware domains, implement parental controls
+- Override responses for specific domains
+
+#### RPZ Triggers (Query Matching)
+| Trigger | Format | Description |
+|---------|--------|-------------|
+| QNAME | domain.rpz.zone | Match query name |
+| IP | prefix.rpz-ip.zone | Match response IP |
+| NSDNAME | ns.rpz-nsdname.zone | Match NS name |
+| NSIP | prefix.rpz-nsip.zone | Match NS IP |
+| CLIENT-IP | prefix.rpz-client-ip.zone | Match client IP |
+
+#### RPZ Actions (Policy)
+| Action | Record | Effect |
+|--------|--------|--------|
+| NXDOMAIN | CNAME . | Return NXDOMAIN |
+| NODATA | CNAME *. | Return empty answer |
+| PASSTHRU | CNAME rpz-passthru. | Allow query |
+| DROP | CNAME rpz-drop. | Drop silently |
+| Local Data | A/AAAA/CNAME | Return specified data |
+
+#### RPZ Zone Example
+```zone
+$TTL 300
+$ORIGIN rpz.example.com.
+@   IN  SOA localhost. root.localhost. (
+        2024011301 1800 900 604800 86400 )
+    IN  NS  localhost.
+
+; Block malware domain (NXDOMAIN)
+malware.example.evil. CNAME .
+
+; Redirect phishing to warning page
+phishing.site.evil.   CNAME warning.example.com.
+
+; Block by response IP (sinkhole)
+32.2.0.192.rpz-ip     CNAME .
+
+; Allow specific domain despite other rules
+allowed.example.com.  CNAME rpz-passthru.
+
+; Wildcard block entire TLD
+*.evil.               CNAME .
+```
+
+#### BIND RPZ Configuration
+```
+options {
+    response-policy {
+        zone "rpz.malware.local" policy nxdomain;
+        zone "rpz.custom.local";
+    };
+};
+
+zone "rpz.malware.local" {
+    type primary;
+    file "/etc/bind/rpz/malware.db";
+    allow-query { none; };
+};
+```
+
+#### Unbound RPZ (via rpz module)
+```yaml
+rpz:
+    name: "rpz.example.com."
+    zonefile: "/etc/unbound/rpz.zone"
+    rpz-action-override: nxdomain
+    rpz-log: yes
+    rpz-log-name: "rpz-block"
+```
+
+### DNS Rebinding Attacks
+
+#### Attack Flow
+```
+1. Victim visits attacker.com
+2. DNS: attacker.com → 1.2.3.4 (attacker's server)
+3. JavaScript loads in victim's browser
+4. DNS TTL expires
+5. DNS: attacker.com → 192.168.1.1 (victim's internal)
+6. Same-origin allows JS to access internal resource
+```
+
+#### Mitigations
+
+**Resolver-Side (DNS Pinning)**
+```yaml
+# Unbound: block private IPs in responses
+server:
+    private-address: 10.0.0.0/8
+    private-address: 172.16.0.0/12
+    private-address: 192.168.0.0/16
+    private-address: fd00::/8
+    private-domain: "local"
+    private-domain: "internal"
+```
+
+**Application-Side**
+- Validate Host header against expected values
+- Implement CORS properly
+- Use authentication for internal services
+- Network segmentation
+
+**Browser-Side**
+- DNS pinning (browsers cache DNS longer than TTL)
+- Private Network Access spec (formerly CORS-RFC1918)
+
+### Anycast DNS
+
+#### Concept
+- Same IP advertised from multiple locations via BGP
+- Queries routed to nearest/best path instance
+- Automatic failover if one site goes down
+
+#### Deployment Architecture
+```
+                     ┌─────────────┐
+           ┌────────→│  DC1 (US)   │
+           │         │ 192.0.2.53  │
+           │         └─────────────┘
+           │
+Users ─────┼─────────┐
+(BGP)      │         │ ┌─────────────┐
+           │         └→│  DC2 (EU)   │
+           │           │ 192.0.2.53  │
+           │           └─────────────┘
+           │
+           │         ┌─────────────┐
+           └────────→│  DC3 (APAC) │
+                     │ 192.0.2.53  │
+                     └─────────────┘
+```
+
+#### BGP Configuration (Bird Example)
+```
+protocol bgp upstream {
+    local as 65001;
+    neighbor 10.0.0.1 as 65000;
+
+    ipv4 {
+        export filter {
+            if net = 192.0.2.53/32 then accept;
+            reject;
+        };
+    };
+}
+
+protocol static anycast_dns {
+    ipv4;
+    route 192.0.2.53/32 blackhole;
+}
+```
+
+#### Anycast Considerations
+| Aspect | Consideration |
+|--------|---------------|
+| Catchment | BGP determines which users reach which site |
+| Failover | BGP withdrawal propagation time (seconds to minutes) |
+| Consistency | All sites must serve identical zone data |
+| Debugging | Use NSID/CHAOS to identify responding site |
+| TCP/DNSSEC | Works but state not shared between sites |
+
+### DNS Flag Days
+
+#### Historical Flag Days
+| Date | Issue | Resolution |
+|------|-------|------------|
+| 2019-02-01 | EDNS workarounds | Resolvers stop retrying without EDNS |
+| 2020-10-01 | IP fragmentation | Responses truncate at 1232 bytes |
+
+#### Testing EDNS Compliance
+```bash
+# Check EDNS support
+dig +norec +dnssec @ns.example.com example.com
+
+# Test with specific buffer size (1232 = current recommendation)
+dig +bufsize=1232 example.com
+
+# Test TCP fallback
+dig +tcp example.com DNSKEY
+
+# Use ISC's checker
+dig @ednscomp.isc.org test.example.com TXT
+```
+
+#### EDNS Compliance Checklist
+- [ ] Server responds to EDNS queries with EDNS
+- [ ] Server responds with TC=1 when response > buffer size
+- [ ] Server handles unknown EDNS options gracefully
+- [ ] Server supports TCP for truncated responses
+- [ ] Server doesn't require DO bit for EDNS
+
+### DNS Cache Poisoning Defenses
+
+#### Attack Surface
+| Vector | Defense |
+|--------|---------|
+| Predictable TXID | Randomize 16-bit transaction ID |
+| Predictable port | Randomize source port |
+| Birthday attack | DNSSEC validation |
+| Kaminsky attack | 0x20 encoding, DNSSEC |
+| Side channels | Rate limiting, cookies |
+
+#### Defense Implementation
+```yaml
+# Unbound hardening
+server:
+    # Randomize query case (0x20 encoding)
+    use-caps-for-id: yes
+
+    # Limit queries to prevent amplification
+    unwanted-reply-threshold: 10000000
+
+    # DNSSEC validation
+    auto-trust-anchor-file: "/var/lib/unbound/root.key"
+    val-clean-additional: yes
+
+    # Harden against various attacks
+    harden-glue: yes
+    harden-dnssec-stripped: yes
+    harden-referral-path: yes
+    harden-algo-downgrade: yes
+    harden-below-nxdomain: yes
+    harden-large-queries: yes
+    harden-short-bufsize: yes
+```
+
+### DNS Amplification Attack Mitigation
+
+#### Server-Side (Authoritative)
+```
+# BIND - Response Rate Limiting
+rate-limit {
+    responses-per-second 10;
+    referrals-per-second 5;
+    nodata-per-second 5;
+    nxdomains-per-second 5;
+    errors-per-second 5;
+    all-per-second 100;
+    window 15;
+    ipv4-prefix-length 24;
+    ipv6-prefix-length 56;
+};
+```
+
+#### Network-Side
+- BCP38/BCP84: Filter spoofed source IPs at edge
+- Block UDP/53 inbound except to authorized resolvers
+- Rate-limit DNS responses at firewall
+
+## Modern DNS Tools
+
+### q - Modern DNS Client
+```bash
+# Install
+go install github.com/natesales/q@latest
+
+# Basic query
+q example.com A
+
+# Multiple record types
+q example.com A AAAA MX
+
+# Encrypted DNS
+q example.com --tls @1.1.1.1
+q example.com --https @cloudflare-dns.com/dns-query
+q example.com --quic @dns.adguard-dns.com
+
+# JSON output
+q example.com --format=json
+
+# Trace resolution
+q example.com --trace
+```
+
+### doggo
+```bash
+# Install
+go install github.com/mr-karan/doggo/cmd/doggo@latest
+
+# Basic query
+doggo example.com A
+
+# DoH query
+doggo example.com --type=A --nameserver=https://cloudflare-dns.com/dns-query
+
+# JSON output
+doggo example.com -J
+
+# Reverse lookup
+doggo -x 8.8.8.8
+```
+
+### dnsx (Security/Recon Tool)
+```bash
+# Install
+go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+
+# Resolve list of domains
+cat domains.txt | dnsx -a -resp
+
+# Find subdomains with specific records
+cat subdomains.txt | dnsx -a -aaaa -cname -mx -txt -resp
+
+# Check for wildcard
+echo example.com | dnsx -wd
+
+# JSON output
+dnsx -d example.com -a -json
+```
+
+### massdns (High-Performance Bulk Resolution)
+```bash
+# Resolve 1M domains quickly
+massdns -r resolvers.txt -t A -o S domains.txt > results.txt
+
+# With rate limiting
+massdns -r resolvers.txt -t A -s 10000 domains.txt
+```
+
+### Tool Comparison
+| Tool | Best For | Encrypted DNS | Output Formats |
+|------|----------|---------------|----------------|
+| dig | General debugging | No | Text |
+| kdig | DNSSEC/modern features | Yes (DoT/DoQ) | Text |
+| q | Modern replacement for dig | Yes (all) | JSON, text |
+| doggo | User-friendly queries | Yes (DoH/DoT) | JSON, table |
+| dnsx | Bulk recon | No | JSON, text |
+| massdns | High-volume resolution | No | Various |
+
+## Advanced Operational Topics
+
+### Multi-CDN DNS Strategy
+
+#### Active-Active Pattern
+```
+                         ┌──────────────────┐
+                    ┌───→│  CDN A (Primary) │
+                    │    │  Weight: 70%     │
+User → GSLB DNS ────┤    └──────────────────┘
+                    │    ┌──────────────────┐
+                    └───→│  CDN B (Backup)  │
+                         │  Weight: 30%     │
+                         └──────────────────┘
+```
+
+#### NS Delegation for Multi-CDN
+```zone
+; At registrar - delegate to multiple providers
+example.com.  IN NS ns1.cdna.example.com.
+example.com.  IN NS ns2.cdna.example.com.
+example.com.  IN NS ns1.cdnb.example.com.
+example.com.  IN NS ns2.cdnb.example.com.
+```
+
+#### Weighted Distribution (Route 53)
+```json
+[
+  {
+    "Name": "cdn.example.com",
+    "Type": "CNAME",
+    "SetIdentifier": "cdn-a",
+    "Weight": 70,
+    "ResourceRecords": [{"Value": "example.cdna.net"}]
+  },
+  {
+    "Name": "cdn.example.com",
+    "Type": "CNAME",
+    "SetIdentifier": "cdn-b",
+    "Weight": 30,
+    "ResourceRecords": [{"Value": "example.cdnb.net"}]
+  }
+]
+```
+
+### GeoDNS / Latency-Based Routing
+
+#### Implementation Approaches
+| Approach | Accuracy | Latency | Complexity |
+|----------|----------|---------|------------|
+| GeoIP database | Moderate | Low | Low |
+| Anycast (BGP) | High | Optimal | High |
+| Client Subnet (ECS) | High | Low | Medium |
+| Latency measurement | Highest | Variable | High |
+
+#### EDNS Client Subnet (ECS)
+```bash
+# Query with client subnet hint
+dig +subnet=203.0.113.0/24 example.com @ns.example.com
+
+# Server sees client network, not resolver network
+# Enables geo-accurate responses through public resolvers
+```
+
+#### PowerDNS GeoIP Backend
+```lua
+-- pdns.conf
+launch=geoip
+geoip-database-files=/usr/share/GeoIP/GeoLite2-Country.mmdb
+
+-- zones/example.com.zone
+example.com:
+  geo:
+    default:
+      - content: 192.0.2.1
+        type: A
+    EU:
+      - content: 192.0.2.2
+        type: A
+    AS:
+      - content: 192.0.2.3
+        type: A
+```
+
+### DNSSEC Algorithm Migration
+
+#### Migration Strategies
+| Strategy | Downtime Risk | Complexity | Time |
+|----------|---------------|------------|------|
+| Double-DS | None | Medium | 2× TTL |
+| Double-DNSKEY | None | Higher | Longer |
+| Algorithm rollover | Low | High | Weeks |
+
+#### Algorithm Rollover Process (RFC 6781)
+```
+Phase 1: Introduce new algorithm
+├── Add new KSK+ZSK with algorithm 13 (ECDSA)
+├── Sign zone with both old (8) and new (13) algorithms
+├── Publish DS for new KSK at parent
+└── Wait for DS TTL + propagation
+
+Phase 2: Remove old algorithm
+├── Verify new DS is visible everywhere
+├── Remove old algorithm signatures (RRSIG)
+├── Remove old DNSKEY records
+├── Request parent remove old DS
+└── Wait for old DS TTL expiry
+```
+
+#### BIND DNSSEC Policy for Migration
+```
+dnssec-policy "migration" {
+    keys {
+        ksk key-directory lifetime unlimited algorithm ecdsap256sha256;
+        zsk key-directory lifetime 30d algorithm ecdsap256sha256;
+    };
+    dnskey-ttl 1h;
+    publish-safety 1h;
+    retire-safety 1h;
+    signatures-refresh 5d;
+    signatures-validity 14d;
+    signatures-validity-dnskey 14d;
+    max-zone-ttl 1d;
+    zone-propagation-delay 5m;
+    parent-ds-ttl 1d;
+    parent-propagation-delay 1h;
+};
+```
+
+### Split-Horizon DNS in Kubernetes
+
+#### CoreDNS Configuration
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns
+  namespace: kube-system
+data:
+  Corefile: |
+    .:53 {
+        errors
+        health
+        kubernetes cluster.local in-addr.arpa ip6.arpa {
+            pods insecure
+            fallthrough in-addr.arpa ip6.arpa
+        }
+        forward . /etc/resolv.conf
+        cache 30
+        loop
+        reload
+        loadbalance
+    }
+
+    internal.example.com:53 {
+        forward . 10.0.0.53
+    }
+```
+
+#### External DNS Integration
+```yaml
+apiVersion: externaldns.k8s.io/v1alpha1
+kind: DNSEndpoint
+metadata:
+  name: my-service
+spec:
+  endpoints:
+  - dnsName: app.example.com
+    recordTTL: 300
+    recordType: A
+    targets:
+    - 192.0.2.1
+```
+
+### DNS Monitoring & Observability
+
+#### Key Metrics
+| Metric | Description | Alert Threshold |
+|--------|-------------|-----------------|
+| Query latency (p99) | Resolution time | > 100ms |
+| SERVFAIL rate | Failed resolutions | > 1% |
+| NXDOMAIN rate | Non-existent domains | Baseline + 20% |
+| Cache hit ratio | Caching effectiveness | < 80% |
+| TCP fallback rate | Large response issues | > 5% |
+
+#### Prometheus Metrics (Unbound)
+```yaml
+# unbound.conf
+server:
+    extended-statistics: yes
+    statistics-interval: 0
+    statistics-cumulative: no
+
+remote-control:
+    control-enable: yes
+    control-interface: /var/run/unbound.sock
+```
+
+```bash
+# Collect via unbound_exporter
+unbound_exporter --unbound.host="unix:///var/run/unbound.sock"
+```
+
+#### dnstap for Query Logging
+```yaml
+# Unbound dnstap config
+dnstap:
+    dnstap-enable: yes
+    dnstap-socket-path: "/var/run/dnstap.sock"
+    dnstap-send-identity: yes
+    dnstap-send-version: yes
+    dnstap-log-client-query-messages: yes
+    dnstap-log-client-response-messages: yes
+```
+
+### Disaster Recovery for DNS
+
+#### DNS Failover Patterns
+```
+                    Health Check
+                         │
+                         ▼
+                   ┌───────────┐
+              ┌────│   GSLB    │────┐
+              │    └───────────┘    │
+              ▼                     ▼
+        ┌──────────┐          ┌──────────┐
+        │ Primary  │          │ Secondary│
+        │  (US)    │          │  (EU)    │
+        └──────────┘          └──────────┘
+```
+
+#### Pre-Failover Preparation
+1. **Lower TTLs** before expected maintenance (300s or less)
+2. **Verify secondary** can handle full load
+3. **Test failover** procedure in staging
+4. **Document rollback** procedure
+
+#### Route 53 Failover Example
+```json
+{
+  "Name": "www.example.com",
+  "Type": "A",
+  "SetIdentifier": "primary",
+  "Failover": "PRIMARY",
+  "HealthCheckId": "abcd1234-...",
+  "ResourceRecords": [{"Value": "192.0.2.1"}]
+}
+```
+
+### IPv6 DNS Considerations
+
+#### Dual-Stack Best Practices
+- Publish both A and AAAA records
+- Use same TTL for A and AAAA (avoid happy eyeballs issues)
+- Test IPv6 reachability before adding AAAA
+- Consider Happy Eyeballs (RFC 8305) client behavior
+
+#### IPv6 PTR Zones
+```zone
+; ip6.arpa delegation for 2001:db8::/32
+$ORIGIN 8.b.d.0.1.0.0.2.ip6.arpa.
+
+; PTR for 2001:db8::1
+1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa. IN PTR host1.example.com.
+```
+
+#### Generate Reverse Zone Script
+```bash
+#!/bin/bash
+# Generate ip6.arpa PTR from IPv6 address
+ipv6_to_ptr() {
+    echo "$1" |
+    sed 's/://g' |
+    rev |
+    sed 's/./&./g' |
+    sed 's/\.$//'
+}.ip6.arpa
+}
+
+ipv6_to_ptr "2001:0db8:0000:0000:0000:0000:0000:0001"
+# Output: 1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa
+```
+
+## Additional RFCs
+
+### Privacy & Encrypted DNS
+| RFC | Title | Summary |
+|-----|-------|---------|
+| 9250 | DNS over Dedicated QUIC | DoQ specification |
+| 9230 | Oblivious DNS over HTTPS | ODoH for query privacy |
+| 9462 | Discovery of Designated Resolvers | DDR for encrypted upgrade |
+| 9463 | DHCP and RA Options for DDR | Network-based DDR discovery |
+| 9464 | Internet X.509 PKI: ECH | ECH certificate requirements |
+
+### Operations & Security
+| RFC | Title | Summary |
+|-----|-------|---------|
+| 5358 | Preventing Reflector Attacks | BCP38 for DNS |
+| 7706 | Decreasing Access Time to Root | Local root copies |
+| 8310 | Usage Profiles for DNS over TLS | DoT deployment guidance |
+| 8906 | A Common Operational Problem | DNS failure patterns |
+| 8932 | Recommendations for DNS Privacy | Client privacy guidance |
+| 9076 | DNS Privacy Considerations | Privacy threat model |
+
+### Service Discovery
+| RFC | Title | Summary |
+|-----|-------|---------|
+| 6762 | Multicast DNS | mDNS specification |
+| 6763 | DNS-Based Service Discovery | DNS-SD specification |
+| 8882 | DNS-SD Privacy Extensions | Private DNS-SD |
