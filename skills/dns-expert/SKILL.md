@@ -3,8 +3,8 @@ name: dns-expert
 description: >
   Use this skill when the user asks about DNS protocol, record types,
   zone files, DNSSEC, DNS troubleshooting, resolver configuration,
-  or DNS-related networking issues.
-version: 1.0.0
+  DANE/TLSA, CAA, HTTPS/SVCB records, or DNS-related networking issues.
+version: 2.0.0
 ---
 
 # DNS Protocol Expert
@@ -50,6 +50,58 @@ See **IANA Registries** section below for complete RR TYPE list.
 - Serial number conventions (YYYYMMDDnn)
 - Multi-line records with parentheses
 
+### DNS Wire Format
+- **Header**: 12 bytes (ID, flags, counts for question/answer/authority/additional)
+- **Question**: QNAME (labels) + QTYPE (2 bytes) + QCLASS (2 bytes)
+- **RR Format**: NAME + TYPE (2) + CLASS (2) + TTL (4) + RDLENGTH (2) + RDATA
+- **Label encoding**: length byte + characters (max 63 bytes per label)
+- **Name compression**: pointer = 0xC0 | offset (2 bytes, points to earlier name)
+- **Maximum name length**: 255 bytes (including length bytes and root)
+
+### Name Rules & Constraints
+- Labels: 1-63 octets each
+- Total name: max 255 octets (wire format with lengths)
+- Printable name: max 253 characters (without trailing dot)
+- Characters: letters, digits, hyphens (LDH rule); no leading/trailing hyphens
+- Case-insensitive comparison, case-preserving storage
+- Underscore (_) allowed for service names (_dmarc, _domainkey, _sip)
+
+### TTL Best Practices
+| Record Type | Recommended TTL | Rationale |
+|-------------|-----------------|-----------|
+| NS (at apex) | 86400 (1 day) | Stable, critical for delegation |
+| NS (glue) | 86400 | Match parent NS TTL |
+| A/AAAA | 300-3600 | Balance caching vs agility |
+| MX | 3600-86400 | Mail routing rarely changes |
+| TXT (SPF/DKIM) | 3600 | Moderate caching |
+| CNAME | 300-3600 | Match target's expected TTL |
+| SOA minimum | 300-3600 | Controls negative caching |
+| DNSKEY | 86400 | Long-lived keys |
+| DS | 3600-86400 | Match parent zone policy |
+
+### Delegation & Glue Records
+- **Delegation**: NS records at zone cut point to child nameservers
+- **Glue required**: When NS target is within the delegated zone (circular reference)
+- **Glue optional**: When NS target is outside delegated zone (can be resolved independently)
+- **In-bailiwick**: NS target is at or below zone apex (needs glue)
+- **Out-of-bailiwick**: NS target is in different zone (no glue needed)
+- **Common mistake**: Missing glue causes SERVFAIL (can't resolve NS to send query)
+
+### Wildcard Records
+- Syntax: `*.example.com` (asterisk as leftmost label only)
+- Matches any label at that position where no exact match exists
+- Does NOT match multi-level: `*.example.com` won't match `a.b.example.com`
+- CNAME wildcards work but apply CNAME rules (no coexistence)
+- Wildcards don't match empty non-terminal names
+- DNSSEC: NSEC/NSEC3 proves wildcard expansion
+
+### Negative Caching
+- **NXDOMAIN (RCODE 3)**: Name does not exist anywhere in zone
+- **NODATA**: Name exists but not for requested type (RCODE 0, empty answer)
+- Both cached using SOA minimum TTL from authority section
+- **NCACHE TTL**: min(SOA TTL, SOA MINIMUM field)
+- Aggressive NSEC: Synthesize NXDOMAIN from cached NSEC records (RFC 8198)
+
 ## Troubleshooting Commands
 
 ### dig (preferred)
@@ -77,6 +129,24 @@ dig example.com ANY
 
 # TCP mode (for large responses)
 dig +tcp example.com DNSKEY
+
+# Check EDNS support and buffer size
+dig +bufsize=1232 +edns=0 example.com
+
+# Query with specific options
+dig +nocmd +noall +answer +ttlid example.com A
+
+# Check NSID (nameserver identifier)
+dig +nsid @ns1.example.com example.com
+
+# Verify zone transfer allowed
+dig @ns1.example.com example.com AXFR
+
+# Check DS at parent
+dig +short com. NS | head -1 | xargs -I{} dig @{} example.com DS +short
+
+# Compare authoritative servers
+for ns in $(dig +short example.com NS); do echo "=== $ns ==="; dig @$ns example.com A +short; done
 ```
 
 ### Other tools
@@ -186,6 +256,254 @@ delv @8.8.8.8 example.com
 - **Amplification attacks**: Rate-limit ANY queries, response rate limiting
 - **DNS tunneling**: Monitor for unusual TXT/NULL queries, long labels
 - **Zone transfer**: Restrict AXFR/IXFR to secondary servers only
+
+## DNS Resolution Algorithm
+
+### Recursive Resolution Steps
+1. Check local cache for answer
+2. If not cached, query root servers (priming query if needed)
+3. Follow referrals down the hierarchy (root → TLD → authoritative)
+4. At each step: send query, receive referral or answer
+5. Cache all responses according to TTL
+6. Return final answer to client
+
+### Iterative Query Flow
+```
+Client → Resolver: "What is www.example.com?"
+Resolver → Root: "Where is .com?"
+Root → Resolver: "Try a.gtld-servers.net" (referral)
+Resolver → TLD: "Where is example.com?"
+TLD → Resolver: "Try ns1.example.com" (referral + glue)
+Resolver → Auth: "What is www.example.com?"
+Auth → Resolver: "192.0.2.1" (answer)
+Resolver → Client: "192.0.2.1"
+```
+
+## HTTPS and SVCB Records (RFC 9460)
+
+### Purpose
+- Service discovery and connection parameters in DNS
+- Enables HTTPS upgrades, ECH, and Alt-Svc via DNS
+- Replaces SRV for HTTP-based services
+
+### HTTPS Record Format
+```zone
+; Priority 0 = alias mode (like CNAME)
+example.com.  IN HTTPS 0 www.example.com.
+
+; Priority 1+ = service mode with parameters
+example.com.  IN HTTPS 1 . alpn="h2,h3" ipv4hint=192.0.2.1 ipv6hint=2001:db8::1
+www           IN HTTPS 1 . alpn="h2,h3" ech="..."
+```
+
+### Service Parameters (SvcParams)
+| Key | ID | Description |
+|-----|-----|-------------|
+| alpn | 1 | ALPN protocols (h2, h3, http/1.1) |
+| no-default-alpn | 2 | Don't use default ALPN |
+| port | 3 | Non-standard port |
+| ipv4hint | 4 | IPv4 address hints |
+| ipv6hint | 6 | IPv6 address hints |
+| ech | 5 | Encrypted Client Hello config |
+| dohpath | 7 | DoH URI template path |
+
+### SVCB for Non-HTTP Services
+```zone
+_xmpp-client._tcp.example.com. IN SVCB 1 xmpp.example.com. alpn="xmpp-client" port=5222
+```
+
+## DANE/TLSA (RFC 6698)
+
+### Purpose
+- Pin TLS certificates via DNS (with DNSSEC)
+- Bypass/complement CA trust model
+- Protect against mis-issued certificates
+
+### TLSA Record Format
+```zone
+; _port._protocol.hostname
+_443._tcp.www.example.com. IN TLSA 3 1 1 <hash>
+```
+
+### TLSA Parameters
+| Field | Values | Description |
+|-------|--------|-------------|
+| Usage | 0=PKIX-TA, 1=PKIX-EE, 2=DANE-TA, 3=DANE-EE | Trust anchor or end entity |
+| Selector | 0=Full cert, 1=SubjectPublicKeyInfo | What to hash |
+| Matching | 0=Exact, 1=SHA-256, 2=SHA-512 | Hash algorithm |
+
+### Common TLSA Configurations
+```zone
+; DANE-EE: Pin leaf certificate's public key (SHA-256)
+_443._tcp.www IN TLSA 3 1 1 2bb183af...
+
+; DANE-TA: Pin issuing CA (for cert rotation flexibility)
+_443._tcp.www IN TLSA 2 1 1 8d02536c...
+```
+
+### Generate TLSA Record
+```bash
+# From certificate file
+openssl x509 -in cert.pem -noout -pubkey | \
+  openssl pkey -pubin -outform DER | \
+  openssl dgst -sha256 -binary | xxd -p -c 256
+
+# Using ldns
+ldns-dane create www.example.com 443 3 1 1
+```
+
+## CAA Records (RFC 8659)
+
+### Purpose
+- Authorize specific CAs to issue certificates
+- Prevent certificate mis-issuance
+- Define violation reporting endpoint
+
+### CAA Record Format
+```zone
+; Only Let's Encrypt and DigiCert can issue
+example.com.  IN CAA 0 issue "letsencrypt.org"
+example.com.  IN CAA 0 issue "digicert.com"
+
+; Wildcard restriction
+example.com.  IN CAA 0 issuewild "letsencrypt.org"
+
+; No wildcard certificates allowed
+example.com.  IN CAA 0 issuewild ";"
+
+; Violation reporting
+example.com.  IN CAA 0 iodef "mailto:security@example.com"
+example.com.  IN CAA 0 iodef "https://example.com/caa-report"
+```
+
+### CAA Flags
+- **0**: Non-critical (CA may proceed if tag unknown)
+- **128**: Critical (CA must reject if tag unknown)
+
+## Common DNS Software
+
+### Authoritative Servers
+| Software | Config File | Key Features |
+|----------|-------------|--------------|
+| BIND 9 | named.conf | Views, DNSSEC, DLZ, RPZ |
+| PowerDNS | pdns.conf | Database backends, API |
+| Knot DNS | knot.conf | High performance, DNSSEC |
+| NSD | nsd.conf | Read-only, fast |
+
+### Resolvers
+| Software | Config File | Key Features |
+|----------|-------------|--------------|
+| Unbound | unbound.conf | DNSSEC validation, caching |
+| BIND (resolver) | named.conf | Full-featured |
+| Knot Resolver | kresd.conf | Modular, Lua scripting |
+| PowerDNS Recursor | recursor.conf | Lua hooks |
+
+### Example Configurations
+
+#### Unbound (Validating Resolver)
+```yaml
+server:
+    interface: 0.0.0.0
+    access-control: 10.0.0.0/8 allow
+    access-control: 127.0.0.0/8 allow
+
+    # DNSSEC validation
+    auto-trust-anchor-file: "/var/lib/unbound/root.key"
+    val-clean-additional: yes
+
+    # Performance
+    num-threads: 4
+    msg-cache-size: 128m
+    rrset-cache-size: 256m
+
+    # Privacy
+    qname-minimisation: yes
+    aggressive-nsec: yes
+
+    # Hardening
+    hide-identity: yes
+    hide-version: yes
+    harden-glue: yes
+    harden-dnssec-stripped: yes
+
+forward-zone:
+    name: "."
+    forward-tls-upstream: yes
+    forward-addr: 1.1.1.1@853#cloudflare-dns.com
+    forward-addr: 8.8.8.8@853#dns.google
+```
+
+#### BIND (Authoritative Zone)
+```
+zone "example.com" {
+    type primary;
+    file "/etc/bind/zones/example.com.zone";
+    allow-transfer { 192.0.2.2; };  // secondary NS
+    also-notify { 192.0.2.2; };
+    dnssec-policy default;
+    inline-signing yes;
+};
+```
+
+## Public DNS Resolvers
+
+| Provider | IPv4 | IPv6 | DoH | DoT | Features |
+|----------|------|------|-----|-----|----------|
+| Cloudflare | 1.1.1.1, 1.0.0.1 | 2606:4700:4700::1111 | cloudflare-dns.com/dns-query | cloudflare-dns.com:853 | Fast, privacy-focused |
+| Google | 8.8.8.8, 8.8.4.4 | 2001:4860:4860::8888 | dns.google/dns-query | dns.google:853 | Global anycast |
+| Quad9 | 9.9.9.9 | 2620:fe::fe | dns.quad9.net/dns-query | dns.quad9.net:853 | Malware blocking |
+| OpenDNS | 208.67.222.222 | 2620:119:35::35 | doh.opendns.com/dns-query | — | Content filtering |
+| AdGuard | 94.140.14.14 | 2a10:50c0::ad1:ff | dns.adguard-dns.com/dns-query | dns.adguard-dns.com:853 | Ad blocking |
+
+### Testing Encrypted DNS
+```bash
+# DNS over TLS
+kdig @1.1.1.1 +tls example.com
+
+# DNS over HTTPS
+curl -H 'accept: application/dns-json' \
+  'https://cloudflare-dns.com/dns-query?name=example.com&type=A'
+
+# Using dog (modern dig alternative)
+dog example.com --tls @1.1.1.1
+```
+
+## Diagnostic Decision Trees
+
+### SERVFAIL Troubleshooting
+```
+SERVFAIL received?
+├── Check if DNSSEC-signed zone
+│   ├── Yes → Validate chain: dig +trace +dnssec
+│   │   ├── DS/DNSKEY mismatch → Fix DS at parent
+│   │   ├── Expired RRSIG → Re-sign zone
+│   │   └── Missing DNSKEY → Check signing process
+│   └── No → Continue
+├── Check authoritative servers reachable
+│   ├── dig @ns1.example.com example.com
+│   └── Timeout? → Network/firewall issue
+├── Check for lame delegation
+│   ├── NS record points to non-authoritative server
+│   └── Fix: Update NS records or server config
+└── Check EDNS compatibility
+    └── dig +bufsize=512 +noedns example.com
+```
+
+### Resolution Failure Checklist
+1. **Local resolver working?** `dig @127.0.0.1 localhost`
+2. **Upstream reachable?** `dig @8.8.8.8 google.com`
+3. **Domain exists?** `dig +trace example.com`
+4. **Authoritative responding?** `dig @ns1.example.com example.com`
+5. **DNSSEC valid?** `dig +dnssec +cd example.com` (CD=checking disabled)
+6. **Firewall blocking?** Check UDP/TCP 53, TCP 853, TCP 443
+
+### Slow Resolution Causes
+- **High RTT to authoritative**: Geographic distance
+- **Missing glue**: Extra round-trips to resolve NS
+- **Low TTLs**: Frequent cache misses
+- **DNSSEC validation**: Crypto overhead + extra queries
+- **TCP fallback**: Large responses trigger TCP retry
+- **Resolver overload**: Queue delays
 
 ## IANA DNS Registries
 
