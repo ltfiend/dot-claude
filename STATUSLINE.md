@@ -125,11 +125,18 @@ The statusline receives JSON from Claude Code with these fields:
 | `.cost.total_cost_usd` | Session cost |
 | `.cost.total_duration_ms` | Session duration |
 | `.context_window.context_window_size` | Max context size |
+| `.context_window.used_percentage` | Pre-calculated % of context used |
+| `.context_window.remaining_percentage` | Pre-calculated % of context remaining |
 | `.context_window.current_usage.input_tokens` | Current turn input |
 | `.context_window.current_usage.output_tokens` | Current turn output |
 | `.context_window.current_usage.cache_creation_input_tokens` | Cache writes |
 | `.context_window.current_usage.cache_read_input_tokens` | Cache hits |
 | `.context_window.total_input_tokens` | Session total input |
 | `.context_window.total_output_tokens` | Session total output |
+| `.cost.total_api_duration_ms` | Time spent on API calls |
+| `.cost.total_lines_added` | Lines of code added in session |
+| `.cost.total_lines_removed` | Lines of code removed in session |
+| `.version` | Claude Code version string |
+| `.workspace.project_dir` | Original project directory |
 | `.session.session_id` | Unique session ID |
 | `.workspace.current_dir` | Working directory |

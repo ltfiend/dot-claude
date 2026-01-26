@@ -75,6 +75,8 @@ CACHE_CREATE=$(get_value '.context_window.current_usage.cache_creation_input_tok
 CACHE_READ=$(get_value '.context_window.current_usage.cache_read_input_tokens')
 TOTAL_INPUT=$(get_value '.context_window.total_input_tokens')
 TOTAL_OUTPUT=$(get_value '.context_window.total_output_tokens')
+USED_PERCENT=$(get_value '.context_window.used_percentage')
+REMAINING_PERCENT=$(get_value '.context_window.remaining_percentage')
 SESSION_ID=$(get_value '.session.session_id')
 WORKSPACE_DIR=$(get_value '.workspace.current_dir')
 
@@ -175,14 +177,20 @@ else
 fi
 
 # Calculate context usage percentage
-CURRENT_TOKENS=0
-if [ -n "$INPUT_TOKENS" ] && [ "$INPUT_TOKENS" != "null" ]; then
-    CURRENT_TOKENS=$((INPUT_TOKENS + ${CACHE_CREATE:-0} + ${CACHE_READ:-0}))
-fi
-
-CONTEXT_PERCENT=0
-if [ -n "$CONTEXT_SIZE" ] && [ "$CONTEXT_SIZE" != "null" ] && [ "$CONTEXT_SIZE" -gt 0 ]; then
-    CONTEXT_PERCENT=$((CURRENT_TOKENS * 100 / CONTEXT_SIZE))
+# Use pre-calculated values from Claude Code if available, otherwise fall back to manual calc
+if [ -n "$REMAINING_PERCENT" ] && [ "$REMAINING_PERCENT" != "null" ]; then
+    HEADROOM_PERCENT=${REMAINING_PERCENT%.*}  # truncate decimal
+    CONTEXT_PERCENT=$((100 - HEADROOM_PERCENT))
+else
+    CURRENT_TOKENS=0
+    if [ -n "$INPUT_TOKENS" ] && [ "$INPUT_TOKENS" != "null" ]; then
+        CURRENT_TOKENS=$((INPUT_TOKENS + ${CACHE_CREATE:-0} + ${CACHE_READ:-0}))
+    fi
+    CONTEXT_PERCENT=0
+    if [ -n "$CONTEXT_SIZE" ] && [ "$CONTEXT_SIZE" != "null" ] && [ "$CONTEXT_SIZE" -gt 0 ]; then
+        CONTEXT_PERCENT=$((CURRENT_TOKENS * 100 / CONTEXT_SIZE))
+    fi
+    HEADROOM_PERCENT=$((100 - CONTEXT_PERCENT))
 fi
 
 # Progress bar function (trueline style)
@@ -312,7 +320,6 @@ fi
 
 # Segment 4: Context headroom bar (shows remaining capacity, decreases as context fills)
 if [ "$SHOW_CONTEXT" -eq 1 ]; then
-    HEADROOM_PERCENT=$((100 - CONTEXT_PERCENT))
     CONTEXT_BAR=$(make_headroom_bar $HEADROOM_PERCENT)
     [ -n "$OUTPUT" ] && OUTPUT+="${SEP}"
     OUTPUT+="${BG_CYAN}${FG_BLACK} 📊 ${HEADROOM_PERCENT}% ${CONTEXT_BAR} ${RESET}"
