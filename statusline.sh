@@ -20,6 +20,13 @@ SHOW_LINES=1          # Lines added/removed
 SHOW_DATETIME=1       # Current date/time
 # ============================================
 
+# ============================================
+# LAYOUT - Reorder segments by rearranging names
+# Use | to separate left-aligned from right-aligned
+# Segments: directory model git_branch context tokens cost cache duration api_duration lines datetime
+# ============================================
+LAYOUT="directory model git_branch context tokens cost cache duration api_duration lines | datetime"
+
 # Project stats directory
 STATS_DIR="$HOME/.claude/project-stats"
 mkdir -p "$STATS_DIR"
@@ -270,116 +277,156 @@ get_git_branch() {
     fi
 }
 
-# Build status line segments
-OUTPUT=""
+# ============================================
+# SEGMENT DEFINITIONS
+# Each function outputs its formatted segment or nothing if disabled/no data
+# ============================================
 
-# Segment 1: Current working directory
-if [ "$SHOW_DIRECTORY" -eq 1 ] && [ -n "$WORKSPACE_DIR" ] && [ "$WORKSPACE_DIR" != "null" ]; then
-    DIR_NAME=$(basename "$WORKSPACE_DIR")
-    OUTPUT+="${BG_BLACK}${FG_WHITE}${BOLD} 📁 ${DIR_NAME} ${RESET}"
-    OUTPUT+="${FG_BLACK}${ARROW_RIGHT}${RESET}"
-fi
+segment_directory() {
+    [ "$SHOW_DIRECTORY" -eq 1 ] || return
+    [ -n "$WORKSPACE_DIR" ] && [ "$WORKSPACE_DIR" != "null" ] || return
+    local DIR_NAME=$(basename "$WORKSPACE_DIR")
+    echo "${BG_BLACK}${FG_WHITE}${BOLD} 📁 ${DIR_NAME} ${RESET}${FG_BLACK}${ARROW_RIGHT}${RESET}"
+}
 
-# Segment 2: Model name with icon
-if [ "$SHOW_MODEL" -eq 1 ]; then
-    MODEL_ICON="🤖"
+segment_model() {
+    [ "$SHOW_MODEL" -eq 1 ] || return
+    local MODEL_ICON="🤖"
     if is_sonnet; then
         MODEL_ICON="🎵"
-        [ -n "$OUTPUT" ] && OUTPUT+="${SEP}"
-        OUTPUT+="${BG_MAGENTA}${FG_BLACK} ${MODEL_ICON} ${MODEL:-Claude} ${RESET}"
-        OUTPUT+="${FG_MAGENTA}${ARROW_RIGHT}${RESET}"
+        echo "${BG_MAGENTA}${FG_BLACK} ${MODEL_ICON} ${MODEL:-Claude} ${RESET}${FG_MAGENTA}${ARROW_RIGHT}${RESET}"
     else
-        [ -n "$OUTPUT" ] && OUTPUT+="${SEP}"
-        OUTPUT+="${BG_BLUE}${FG_BLACK} ${MODEL_ICON} ${MODEL:-Claude} ${RESET}"
-        OUTPUT+="${FG_BLUE}${ARROW_RIGHT}${RESET}"
+        echo "${BG_BLUE}${FG_BLACK} ${MODEL_ICON} ${MODEL:-Claude} ${RESET}${FG_BLUE}${ARROW_RIGHT}${RESET}"
     fi
-fi
+}
 
-# Segment 3: Git branch (if in a git repo)
-if [ "$SHOW_GIT_BRANCH" -eq 1 ]; then
-    GIT_ICON=$'\uf1d2'  # Font Awesome git icon
-    GIT_BRANCH=$(get_git_branch)
-    if [ -n "$GIT_BRANCH" ]; then
-        [ -n "$OUTPUT" ] && OUTPUT+="${SEP}"
-        OUTPUT+="${BG_ORANGE}${FG_BLACK} ${GIT_ICON} ${GIT_BRANCH} ${RESET}"
-        OUTPUT+="${FG_ORANGE}${ARROW_RIGHT}${RESET}"
-    fi
-fi
+segment_git_branch() {
+    [ "$SHOW_GIT_BRANCH" -eq 1 ] || return
+    local GIT_ICON=$'\uf1d2'
+    local GIT_BRANCH=$(get_git_branch)
+    [ -n "$GIT_BRANCH" ] || return
+    echo "${BG_ORANGE}${FG_BLACK} ${GIT_ICON} ${GIT_BRANCH} ${RESET}${FG_ORANGE}${ARROW_RIGHT}${RESET}"
+}
 
-# Segment 4: Context headroom bar (shows remaining capacity, decreases as context fills)
-if [ "$SHOW_CONTEXT" -eq 1 ]; then
-    CONTEXT_BAR=$(make_headroom_bar $HEADROOM_PERCENT)
-    [ -n "$OUTPUT" ] && OUTPUT+="${SEP}"
-    OUTPUT+="${BG_CYAN}${FG_BLACK} 📊 ${HEADROOM_PERCENT}% ${CONTEXT_BAR} ${RESET}"
-    OUTPUT+="${FG_CYAN}${ARROW_RIGHT}${RESET}"
-fi
+segment_context() {
+    [ "$SHOW_CONTEXT" -eq 1 ] || return
+    local CONTEXT_BAR=$(make_headroom_bar $HEADROOM_PERCENT)
+    echo "${BG_CYAN}${FG_BLACK} 📊 ${HEADROOM_PERCENT}% ${CONTEXT_BAR} ${RESET}${FG_CYAN}${ARROW_RIGHT}${RESET}"
+}
 
-# Segment 5: Project tokens (accumulated)
-if [ "$SHOW_TOKENS" -eq 1 ]; then
-    TOKENS_DISPLAY="$(format_tokens ${PROJECT_INPUT:-0})/$(format_tokens ${PROJECT_OUTPUT:-0})"
-    [ -n "$OUTPUT" ] && OUTPUT+="${SEP}"
-    OUTPUT+="${BG_GREEN}${FG_BLACK} ⇅ ${TOKENS_DISPLAY} ${RESET}"
-    OUTPUT+="${FG_GREEN}${ARROW_RIGHT}${RESET}"
-fi
+segment_tokens() {
+    [ "$SHOW_TOKENS" -eq 1 ] || return
+    local TOKENS_DISPLAY="$(format_tokens ${PROJECT_INPUT:-0})/$(format_tokens ${PROJECT_OUTPUT:-0})"
+    echo "${BG_GREEN}${FG_BLACK} ⇅ ${TOKENS_DISPLAY} ${RESET}${FG_GREEN}${ARROW_RIGHT}${RESET}"
+}
 
-# Segment 6: Project cost (accumulated)
-if [ "$SHOW_COST" -eq 1 ]; then
-    COST_DISPLAY=$(format_cost "$PROJECT_COST")
-    [ -n "$OUTPUT" ] && OUTPUT+="${SEP}"
-    OUTPUT+="${BG_BLACK}${FG_WHITE} 💰 ${COST_DISPLAY} ${RESET}"
-    OUTPUT+="${FG_BLACK}${ARROW_RIGHT}${RESET}"
-fi
+segment_cost() {
+    [ "$SHOW_COST" -eq 1 ] || return
+    local COST_DISPLAY=$(format_cost "$PROJECT_COST")
+    echo "${BG_BLACK}${FG_WHITE} 💰 ${COST_DISPLAY} ${RESET}${FG_BLACK}${ARROW_RIGHT}${RESET}"
+}
 
-# Segment 7: Cache efficiency (if cache is being used)
-if [ "$SHOW_CACHE" -eq 1 ]; then
-    CACHE_TOTAL=$((${CACHE_CREATE:-0} + ${CACHE_READ:-0}))
-    if [ "$CACHE_TOTAL" -gt 0 ]; then
-        CACHE_HIT_PERCENT=$((${CACHE_READ:-0} * 100 / CACHE_TOTAL))
-        [ -n "$OUTPUT" ] && OUTPUT+="${SEP}"
-        OUTPUT+="${BG_STEEL_BLUE}${FG_BLACK} ⚡${CACHE_HIT_PERCENT}% ${RESET}"
-        OUTPUT+="${FG_STEEL_BLUE}${ARROW_RIGHT}${RESET}"
-    fi
-fi
+segment_cache() {
+    [ "$SHOW_CACHE" -eq 1 ] || return
+    local CACHE_TOTAL=$((${CACHE_CREATE:-0} + ${CACHE_READ:-0}))
+    [ "$CACHE_TOTAL" -gt 0 ] || return
+    local CACHE_HIT_PERCENT=$((${CACHE_READ:-0} * 100 / CACHE_TOTAL))
+    echo "${BG_STEEL_BLUE}${FG_BLACK} ⚡${CACHE_HIT_PERCENT}% ${RESET}${FG_STEEL_BLUE}${ARROW_RIGHT}${RESET}"
+}
 
-# Segment 8: Project duration (accumulated)
-if [ "$SHOW_DURATION" -eq 1 ]; then
-    DURATION_DISPLAY=$(format_duration "$PROJECT_DURATION")
-    [ -n "$OUTPUT" ] && OUTPUT+="${SEP}"
-    OUTPUT+="${BG_MAGENTA}${FG_BLACK} ⏱ ${DURATION_DISPLAY} ${RESET}"
-    OUTPUT+="${FG_MAGENTA}${ARROW_RIGHT}${RESET}"
-fi
+segment_duration() {
+    [ "$SHOW_DURATION" -eq 1 ] || return
+    local DURATION_DISPLAY=$(format_duration "$PROJECT_DURATION")
+    echo "${BG_MAGENTA}${FG_BLACK} ⏱ ${DURATION_DISPLAY} ${RESET}${FG_MAGENTA}${ARROW_RIGHT}${RESET}"
+}
 
-# Segment 9: API duration (time spent waiting on API)
-if [ "$SHOW_API_DURATION" -eq 1 ]; then
-    API_DUR=${API_DURATION_MS:-0}
+segment_api_duration() {
+    [ "$SHOW_API_DURATION" -eq 1 ] || return
+    local API_DUR=${API_DURATION_MS:-0}
     [[ "$API_DUR" == "null" ]] && API_DUR=0
-    if [ "$API_DUR" -gt 0 ]; then
-        API_DURATION_DISPLAY=$(format_duration "$API_DUR")
-        [ -n "$OUTPUT" ] && OUTPUT+="${SEP}"
-        OUTPUT+="${BG_YELLOW}${FG_BLACK} 📡 ${API_DURATION_DISPLAY} ${RESET}"
-        OUTPUT+="${FG_YELLOW}${ARROW_RIGHT}${RESET}"
-    fi
-fi
+    [ "$API_DUR" -gt 0 ] || return
+    local API_DURATION_DISPLAY=$(format_duration "$API_DUR")
+    echo "${BG_YELLOW}${FG_BLACK} 📡 ${API_DURATION_DISPLAY} ${RESET}${FG_YELLOW}${ARROW_RIGHT}${RESET}"
+}
 
-# Segment 10: Lines added/removed
-if [ "$SHOW_LINES" -eq 1 ]; then
-    LA=${LINES_ADDED:-0}
-    LR=${LINES_REMOVED:-0}
+segment_lines() {
+    [ "$SHOW_LINES" -eq 1 ] || return
+    local LA=${LINES_ADDED:-0}
+    local LR=${LINES_REMOVED:-0}
     [[ "$LA" == "null" ]] && LA=0
     [[ "$LR" == "null" ]] && LR=0
-    if [ "$LA" -gt 0 ] || [ "$LR" -gt 0 ]; then
-        [ -n "$OUTPUT" ] && OUTPUT+="${SEP}"
-        OUTPUT+="${BG_BLACK}${FG_GREEN}${BOLD} +${LA} ${RESET}${BG_BLACK}${FG_MAROON}${BOLD} -${LR} ${RESET}"
-        OUTPUT+="${FG_BLACK}${ARROW_RIGHT}${RESET}"
+    [ "$LA" -gt 0 ] || [ "$LR" -gt 0 ] || return
+    echo "${BG_BLACK}${FG_GREEN}${BOLD} +${LA} ${RESET}${BG_BLACK}${FG_MAROON}${BOLD} -${LR} ${RESET}${FG_BLACK}${ARROW_RIGHT}${RESET}"
+}
+
+segment_datetime() {
+    [ "$SHOW_DATETIME" -eq 1 ] || return
+    local CURRENT_TIME=$(date '+%Y-%m-%d %H:%M')
+    echo "${BG_GRAY}${FG_BLACK} ${CURRENT_TIME} ${RESET}${FG_GRAY}${ARROW_RIGHT}${RESET}"
+}
+
+# ============================================
+# RENDER ENGINE
+# ============================================
+
+render_segment() {
+    case "$1" in
+        directory)    segment_directory ;;
+        model)        segment_model ;;
+        git_branch)   segment_git_branch ;;
+        context)      segment_context ;;
+        tokens)       segment_tokens ;;
+        cost)         segment_cost ;;
+        cache)        segment_cache ;;
+        duration)     segment_duration ;;
+        api_duration) segment_api_duration ;;
+        lines)        segment_lines ;;
+        datetime)     segment_datetime ;;
+    esac
+}
+
+# Strip ANSI escape codes to measure visible character width
+visible_length() {
+    local clean
+    clean=$(echo -e "$1" | sed $'s/\033\[[0-9;]*m//g')
+    echo "${#clean}"
+}
+
+# Parse LAYOUT into left and right groups, render segments
+LEFT_OUTPUT=""
+RIGHT_OUTPUT=""
+side="left"
+
+for item in $LAYOUT; do
+    if [ "$item" = "|" ]; then
+        side="right"
+        continue
     fi
-fi
+    result=$(render_segment "$item")
+    if [ -n "$result" ]; then
+        if [ "$side" = "left" ]; then
+            [ -n "$LEFT_OUTPUT" ] && LEFT_OUTPUT+="${SEP}"
+            LEFT_OUTPUT+="$result"
+        else
+            [ -n "$RIGHT_OUTPUT" ] && RIGHT_OUTPUT+="${SEP}"
+            RIGHT_OUTPUT+="$result"
+        fi
+    fi
+done
 
-# Segment 11: Current date/time (far right)
-if [ "$SHOW_DATETIME" -eq 1 ]; then
-    CURRENT_TIME=$(date '+%Y-%m-%d %H:%M')
-    [ -n "$OUTPUT" ] && OUTPUT+="${SEP}"
-    OUTPUT+="${BG_GRAY}${FG_BLACK} ${CURRENT_TIME} ${RESET}"
-    OUTPUT+="${FG_GRAY}${ARROW_RIGHT}${RESET}"
+# Output with right-justification padding
+if [ -n "$RIGHT_OUTPUT" ]; then
+    TERM_WIDTH=$(tput cols 2>/dev/null || echo 120)
+    LEFT_LEN=$(visible_length "$LEFT_OUTPUT")
+    RIGHT_LEN=$(visible_length "$RIGHT_OUTPUT")
+    PADDING=$((TERM_WIDTH - LEFT_LEN - RIGHT_LEN))
+    if [ "$PADDING" -gt 0 ]; then
+        printf -v PAD_STR '%*s' "$PADDING" ''
+        echo -e "${LEFT_OUTPUT}${PAD_STR}${RIGHT_OUTPUT}"
+    else
+        # Terminal too narrow for padding; fall back to separator
+        echo -e "${LEFT_OUTPUT}${SEP}${RIGHT_OUTPUT}"
+    fi
+else
+    echo -e "$LEFT_OUTPUT"
 fi
-
-echo -e "$OUTPUT"
