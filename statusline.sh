@@ -15,6 +15,8 @@ SHOW_TOKENS=1         # Project token counts
 SHOW_COST=1           # Project cost
 SHOW_CACHE=1          # Cache efficiency
 SHOW_DURATION=1       # Project duration
+SHOW_API_DURATION=1   # API call duration
+SHOW_LINES=1          # Lines added/removed
 SHOW_DATETIME=1       # Current date/time
 # ============================================
 
@@ -75,6 +77,9 @@ TOTAL_OUTPUT=$(get_value '.context_window.total_output_tokens')
 REMAINING_PERCENT=$(get_value '.context_window.remaining_percentage')
 SESSION_ID=$(get_value '.session.session_id')
 WORKSPACE_DIR=$(get_value '.workspace.current_dir')
+API_DURATION_MS=$(get_value '.cost.total_api_duration_ms')
+LINES_ADDED=$(get_value '.cost.total_lines_added')
+LINES_REMOVED=$(get_value '.cost.total_lines_removed')
 
 # Project stats tracking
 get_project_hash() {
@@ -344,7 +349,32 @@ if [ "$SHOW_DURATION" -eq 1 ]; then
     OUTPUT+="${FG_MAGENTA}${ARROW_RIGHT}${RESET}"
 fi
 
-# Segment 9: Current date/time (far right)
+# Segment 9: API duration (time spent waiting on API)
+if [ "$SHOW_API_DURATION" -eq 1 ]; then
+    API_DUR=${API_DURATION_MS:-0}
+    [[ "$API_DUR" == "null" ]] && API_DUR=0
+    if [ "$API_DUR" -gt 0 ]; then
+        API_DURATION_DISPLAY=$(format_duration "$API_DUR")
+        [ -n "$OUTPUT" ] && OUTPUT+="${SEP}"
+        OUTPUT+="${BG_YELLOW}${FG_BLACK} 📡 ${API_DURATION_DISPLAY} ${RESET}"
+        OUTPUT+="${FG_YELLOW}${ARROW_RIGHT}${RESET}"
+    fi
+fi
+
+# Segment 10: Lines added/removed
+if [ "$SHOW_LINES" -eq 1 ]; then
+    LA=${LINES_ADDED:-0}
+    LR=${LINES_REMOVED:-0}
+    [[ "$LA" == "null" ]] && LA=0
+    [[ "$LR" == "null" ]] && LR=0
+    if [ "$LA" -gt 0 ] || [ "$LR" -gt 0 ]; then
+        [ -n "$OUTPUT" ] && OUTPUT+="${SEP}"
+        OUTPUT+="${BG_BLACK}${FG_GREEN}${BOLD} +${LA} ${RESET}${BG_BLACK}${FG_MAROON}${BOLD} -${LR} ${RESET}"
+        OUTPUT+="${FG_BLACK}${ARROW_RIGHT}${RESET}"
+    fi
+fi
+
+# Segment 11: Current date/time (far right)
 if [ "$SHOW_DATETIME" -eq 1 ]; then
     CURRENT_TIME=$(date '+%Y-%m-%d %H:%M')
     [ -n "$OUTPUT" ] && OUTPUT+="${SEP}"
