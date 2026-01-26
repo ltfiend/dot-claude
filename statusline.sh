@@ -25,7 +25,7 @@ SHOW_DATETIME=1       # Current date/time
 # Use | to separate left-aligned from right-aligned
 # Segments: directory model git_branch context tokens cost cache duration api_duration lines datetime
 # ============================================
-LAYOUT="directory model git_branch context tokens cost cache duration api_duration lines | datetime"
+LAYOUT="directory git_branch model lines context tokens cost cache | duration api_duration datetime"
 
 # Project stats directory
 STATS_DIR="$HOME/.claude/project-stats"
@@ -147,6 +147,12 @@ update_project_stats() {
         local total_input=$cur_input
         local total_output=$cur_output
     fi
+
+    # Validate bc outputs (empty/failed bc produces empty strings)
+    [[ -z "$total_cost" || "$total_cost" == *"error"* ]] && total_cost=0
+    [[ -z "$total_duration" ]] && total_duration=0
+    [[ -z "$total_input" ]] && total_input=0
+    [[ -z "$total_output" ]] && total_output=0
 
     # Save updated stats
     cat > "$stats_file" << EOF
@@ -355,7 +361,6 @@ segment_lines() {
     local LR=${LINES_REMOVED:-0}
     [[ "$LA" == "null" ]] && LA=0
     [[ "$LR" == "null" ]] && LR=0
-    [ "$LA" -gt 0 ] || [ "$LR" -gt 0 ] || return
     echo "${BG_BLACK}${FG_GREEN}${BOLD} +${LA} ${RESET}${BG_BLACK}${FG_MAROON}${BOLD} -${LR} ${RESET}${FG_BLACK}${ARROW_RIGHT}${RESET}"
 }
 
