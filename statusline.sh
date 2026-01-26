@@ -10,7 +10,7 @@ input=$(cat)
 SHOW_DIRECTORY=1      # Current working directory
 SHOW_MODEL=1          # Model name (Opus/Sonnet)
 SHOW_GIT_BRANCH=1     # Git branch name
-SHOW_CONTEXT=0        # Context headroom bar
+SHOW_CONTEXT=1        # Context headroom bar
 SHOW_TOKENS=1         # Project token counts
 SHOW_COST=1           # Project cost
 SHOW_CACHE=1          # Cache efficiency
@@ -68,14 +68,10 @@ MODEL=$(get_value '.model.display_name')
 MODEL_ID=$(get_value '.model.id')
 COST=$(get_value '.cost.total_cost_usd')
 DURATION_MS=$(get_value '.cost.total_duration_ms')
-CONTEXT_SIZE=$(get_value '.context_window.context_window_size')
-INPUT_TOKENS=$(get_value '.context_window.current_usage.input_tokens')
-OUTPUT_TOKENS=$(get_value '.context_window.current_usage.output_tokens')
 CACHE_CREATE=$(get_value '.context_window.current_usage.cache_creation_input_tokens')
 CACHE_READ=$(get_value '.context_window.current_usage.cache_read_input_tokens')
 TOTAL_INPUT=$(get_value '.context_window.total_input_tokens')
 TOTAL_OUTPUT=$(get_value '.context_window.total_output_tokens')
-USED_PERCENT=$(get_value '.context_window.used_percentage')
 REMAINING_PERCENT=$(get_value '.context_window.remaining_percentage')
 SESSION_ID=$(get_value '.session.session_id')
 WORKSPACE_DIR=$(get_value '.workspace.current_dir')
@@ -176,22 +172,9 @@ else
     PROJECT_OUTPUT=$TOTAL_OUTPUT
 fi
 
-# Calculate context usage percentage
-# Use pre-calculated values from Claude Code if available, otherwise fall back to manual calc
-if [ -n "$REMAINING_PERCENT" ] && [ "$REMAINING_PERCENT" != "null" ]; then
-    HEADROOM_PERCENT=${REMAINING_PERCENT%.*}  # truncate decimal
-    CONTEXT_PERCENT=$((100 - HEADROOM_PERCENT))
-else
-    CURRENT_TOKENS=0
-    if [ -n "$INPUT_TOKENS" ] && [ "$INPUT_TOKENS" != "null" ]; then
-        CURRENT_TOKENS=$((INPUT_TOKENS + ${CACHE_CREATE:-0} + ${CACHE_READ:-0}))
-    fi
-    CONTEXT_PERCENT=0
-    if [ -n "$CONTEXT_SIZE" ] && [ "$CONTEXT_SIZE" != "null" ] && [ "$CONTEXT_SIZE" -gt 0 ]; then
-        CONTEXT_PERCENT=$((CURRENT_TOKENS * 100 / CONTEXT_SIZE))
-    fi
-    HEADROOM_PERCENT=$((100 - CONTEXT_PERCENT))
-fi
+# Context remaining percentage (from Claude Code JSON)
+HEADROOM_PERCENT=${REMAINING_PERCENT%.*}  # truncate decimal
+HEADROOM_PERCENT=${HEADROOM_PERCENT:-100}
 
 # Progress bar function (trueline style)
 # Shows remaining capacity (bar decreases as usage increases)
