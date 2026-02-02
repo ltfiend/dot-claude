@@ -5,6 +5,10 @@
     "command": "~/.claude/statusline.sh",
     "padding": 0
   },
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -12,6 +16,11 @@
           {
             "type": "command",
             "command": "/home/peter/.claude/hooks/log-prompts.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "/home/peter/.claude/hooks/check-ssh-agent.sh",
             "timeout": 5
           }
         ]
