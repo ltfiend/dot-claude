@@ -10,22 +10,27 @@ input=$(cat)
 SHOW_DIRECTORY=1      # Current working directory
 SHOW_MODEL=1          # Model name (Opus/Sonnet)
 SHOW_GIT_BRANCH=1     # Git branch name
-SHOW_CONTEXT=1        # Context headroom bar
+SHOW_CONTEXT=0        # Context headroom bar
 SHOW_TOKENS=1         # Project token counts
 SHOW_COST=1           # Project cost
 SHOW_CACHE=1          # Cache efficiency
 SHOW_DURATION=1       # Project duration
 SHOW_API_DURATION=1   # API call duration
 SHOW_LINES=1          # Lines added/removed
+SHOW_HOSTNAME=1       # Hostname/system name
 SHOW_DATETIME=1       # Current date/time
 # ============================================
+
+# Override hostname display (defaults to $HOSTNAME)
+# STATUSLINE_HOSTNAME="my-server"
 
 # ============================================
 # LAYOUT - Reorder segments by rearranging names
 # Use | to separate left-aligned from right-aligned
-# Segments: directory model git_branch context tokens cost cache duration api_duration lines datetime
+# Segments: hostname directory model git_branch context tokens cost cache duration api_duration lines datetime
 # ============================================
-LAYOUT="directory git_branch model lines context tokens cost cache | duration api_duration datetime"
+LAYOUT="hostname directory git_branch lines model context tokens cost cache | api_duration duration datetime"
+# LAYOUT="directory git_branch lines model context tokens cost cache | duration api_duration datetime"
 
 # Project stats directory
 STATS_DIR="$HOME/.claude/project-stats"
@@ -288,6 +293,13 @@ get_git_branch() {
 # Each function outputs its formatted segment or nothing if disabled/no data
 # ============================================
 
+segment_hostname() {
+    [ "$SHOW_HOSTNAME" -eq 1 ] || return
+    local DISPLAY_NAME="${STATUSLINE_HOSTNAME:-$HOSTNAME}"
+    [ -n "$DISPLAY_NAME" ] || return
+    echo "${BG_CYAN}${FG_BLACK}${BOLD} 🖥 ${DISPLAY_NAME} ${RESET}${FG_CYAN}${ARROW_RIGHT}${RESET}"
+}
+
 segment_directory() {
     [ "$SHOW_DIRECTORY" -eq 1 ] || return
     [ -n "$WORKSPACE_DIR" ] && [ "$WORKSPACE_DIR" != "null" ] || return
@@ -376,6 +388,7 @@ segment_datetime() {
 
 render_segment() {
     case "$1" in
+        hostname)     segment_hostname ;;
         directory)    segment_directory ;;
         model)        segment_model ;;
         git_branch)   segment_git_branch ;;
